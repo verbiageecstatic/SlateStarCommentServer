@@ -5,3 +5,4 @@ See https://github.com/bakkot/SlateStarComments
 
 This is a server that queries WordPress's api, fetches the list of comments, and then exposes an endpoint indicating which comments are in reply to which other comments.
 
+See also https://www.reddit.com/r/slatestarcodex/comments/64h4zy/ot73_i_lik_the_thred/dg2w865/
