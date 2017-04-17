@@ -16,6 +16,7 @@ var Block = block.Block;
 var request = require('request');
 var querystring = require('querystring');
 var express = require('express');
+var url = require('url')
 
 //How soon we kick off the loading-new-comments process after the last one finishes
 var LOAD_COMMENTS_EVERY = 10*1000;
@@ -85,7 +86,7 @@ function withClient(fn) {
                 return block.await(client.query(sql, params));
             }
         }
-        fn(c);
+        return fn(c);
     } finally {
         client.release();
     }
@@ -97,8 +98,9 @@ function transaction(fn) {
     withClient(function(client) {
         try {
             client.query('BEGIN');
-            fn(client);
+            ret = fn(client);
             client.query('COMMIT');
+            return ret;
         } catch (err) {
             client.query('ROLLBACK');
             throw err;
@@ -236,6 +238,7 @@ function fetchComments() {
     //console.log('Successfully committed');
 }
 
+//Express route that displays the status of the comment downloading
 function statusEndpoint (req, res, next) {
     try {
         var msg = 'Status: ';
@@ -257,10 +260,84 @@ function statusEndpoint (req, res, next) {
     }
 }
 
+//Express route that returns a JSON list of replies
+function replies(req, res, next) {
+    //Run this on a synchronous coroutine to enable waiting
+    block.run(function() {
+        try {
+            //Parse the querystring.  We support author_name, from, page
+            var params, author_name, from, page, page_size;
+            params = url.parse(req.url, true).query;
+            author_name = params.author_name;
+            from = parseInt(params.from);
+            if (params.page) {
+                page = parseInt(params.page);
+            } else {
+                page = 1;
+            }
+            if (params.page_size) {
+                page_size = parseInt(params.page_size);
+            } else {
+                page_size = 10;
+            }
+            
+            //Sends a 400 message to the client
+            function return400 (msg) {
+                res.statusCode = 400;
+                res.end(msg);
+            }
+            
+            //Validate the parameters
+            if (!author_name) {
+                return return400('Missing "author_name" parameter in querystring');
+            }
+            if (Number.isNaN(from)) {
+                return return400('Invalid or missing "from" paramater: should be a unix timestamp in miliseconds');
+            }
+            if (Number.isNaN(page) || page < 1) {
+                return return400('Invalid "page" parameter: should be an integer >= 1');
+            }
+            if (Number.isNaN(page_size) || page_size < 1 || page_size > 100) {
+                return return400('Invalid "page_size" parameter: should be an integer between 1 and 100');
+            }
+            
+            //Get a postgres client and do a search for comments that match these parameters
+            var rows = withClient(function(client) {
+                var limit, offset;
+                //Currently we return at most 100 replies per call
+                limit = page_size;
+                offset = limit * (page - 1);
+                
+                sql = "SELECT data FROM public.comments WHERE in_reply_to @> ARRAY[$1] AND timestamp > $2 ORDER BY timestamp LIMIT $3 OFFSET $4";
+                
+                return client.query(sql, [author_name, from, limit, offset]).rows;
+            });
+            
+            //Build the results to return to the client
+            var results = [];
+            for (var i = 0; i < rows.length; i++) {
+                results.push(rows[i].data);
+            }
+            
+            //And send them
+            res.end(JSON.stringify(results));
+        
+        } catch (err) {
+            //On error, log it, then return to the client
+            console.log('Error handling ' + req.url + ':');
+            console.log(err.stack);
+            next(err);
+        } 
+    });
+}
+
 
 //Starts up our API server
 function startServer() {
     var app = express();
+    
+    //install the replies endpoint
+    app.get('/replies', replies);
     
     //install the status endpoint
     app.get('/', statusEndpoint);
