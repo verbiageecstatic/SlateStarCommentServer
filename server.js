@@ -15,6 +15,7 @@ var block = require('./block');
 var Block = block.Block;
 var request = require('request');
 var querystring = require('querystring');
+var express = require('express');
 
 //How soon we kick off the loading-new-comments process after the last one finishes
 var LOAD_COMMENTS_EVERY = 10*1000;
@@ -235,10 +236,44 @@ function fetchComments() {
     //console.log('Successfully committed');
 }
 
+function statusEndpoint (req, res, next) {
+    try {
+        var msg = 'Status: ';
+        if (lastError) {
+            msg += 'unhealthy\n\nLast error:\n' + lastError.stack
+        } else if (latestTimestamp) {
+            msg += 'healthy'
+        } else {
+            msg += 'starting up'
+        }
+        if (latestTimestamp) {
+            msg += '\n\n\nCaught up to: ' + String(new Date(latestTimestamp))
+        }
+        res.end(msg);
+    
+    } catch (err) {
+        console.log(err);
+        next(err);
+    }
+}
+
 
 //Starts up our API server
 function startServer() {
-    console.log('Pretend we just started a server');
+    var app = express();
+    
+    //install the status endpoint
+    app.get('/', statusEndpoint);
+    
+    port = get_config().port;
+    app.listen(port, function(err) {
+        if (err) {
+            console.log('Unable to listen on port ' + port + ': ');
+            console.log(err);
+            process.exit(1);
+        }
+        console.log('Listening on port ' + port);
+    });
 }
 
 
@@ -272,6 +307,11 @@ if (require.main === module) {
     //Confirm we've configured an api base url
     if (!get_config().api_base) {
         console.log('Please set "api_base" in config.json.  E.g., http://slatestarcodex.com');
+        process.exit(1);
+    }
+    //Confirm we've configured a port to listen on
+    if (!get_config().port) {
+        console.log('Please set "port" in config.json. E.g., 80.');
         process.exit(1);
     }
 
