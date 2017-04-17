@@ -5,7 +5,7 @@
 //Tested on node v6.10.2
 
 //Run this in an anonymous function to avoid accidentally creating global variables
-function() {
+(function() {
 
 //Dependencies
 var pg = require('pg');
@@ -16,9 +16,21 @@ var Block = block.Block;
 var request = require('request');
 var querystring = require('querystring');
 
+//How soon we kick off the loading-new-comments process after the last one finishes
+var LOAD_COMMENTS_EVERY = 10*1000;
+//How long we wait before retrying the loading-new-comments process if it fails
+var FAIL_RETRY = 5*60*1000;
+//The number of pages of results we load before committing the transaction
+var MAX_PAGES = 10;
+
 
 //cache our loaded configuration
 var _config_cache; 
+
+//Track how caught up we are
+var latestTimestamp = null;
+//If we hit an error fetching comments, save it
+var lastError = null;
 
 
 //Loads our configuration from config.json.  This is a git-ignored file
@@ -69,7 +81,7 @@ function withClient(fn) {
     try {
         var c = {
             query: function (sql, params) {
-                return block.wait(client.query(sql, params));
+                return block.await(client.query(sql, params));
             }
         }
         fn(c);
@@ -97,6 +109,10 @@ function transaction(fn) {
 //Fetches all the comments that have come in since we last fetched,
 //and persists them to the database as a single transaction.
 function fetchComments() {
+    //Track the latest timestamp for this operation.  On commit, we update the global
+    //latestTimestamp variable
+    var lt = null;
+
     //We run this entire operation as a transaction to protect against accidentally
     //having two comment-fetching processes running at once
     transaction(function(client) {
@@ -109,14 +125,8 @@ function fetchComments() {
         if (res.rows[0]) {
              start = parseInt(res.rows[0].timestamp);
         } else {
-            start = 0; //Start from the beginning of time
-        }
-        
-        //Pick an end-date.  Either the present time, or one month from the start date,
-        //whichever is earlier
-        var end = Date.now();
-        if (end - start > 30*24*60*60*1000) {
-            end = start + 30*24*60*60*1000;
+            //Start from the beginning of time (plus a bit because Wordpress errors if start = 0)
+            start = 86400000; 
         }
         
         //We maintain a cache of comment ids to author names, because comments will
@@ -132,15 +142,16 @@ function fetchComments() {
             }
             
             //Otherwise, look it up from the database
-            res = client.query("SELECT data->'author_name::text as author_name FROM public.comments WHERE id = $1", [id])
+            res = client.query("SELECT data->'author_name'::text as author_name FROM public.comments WHERE id = $1", [id])
             if (!res.rows[0] || !res.rows[0].author_name) { return null; }
             ids_to_author_name[id] = res.rows[0].author_name;
             return ids_to_author_name[id];
         }
         
         //Start from the first page of results, and go until there are no more results
+        //or we are at MAX_PAGES
         var page = 1;
-        while (true) {
+        while (page <= MAX_PAGES) {
         
             //Build the parameters to make the call to the wordpress API
             var url = get_config().api_base + '/wp-json/wp/v2/comments?'
@@ -148,20 +159,22 @@ function fetchComments() {
                 page: page,
                 per_page: 100,
                 after: (new Date(start)).toISOString(),
-                before: (new Date(end)).toISOString(),
                 order: 'asc'
             }
             url = url + querystring.stringify(params);
+            
+            //Temporary debugging:
+            //console.log('Fetching ' + url);
             
             //Do the request and error if it's not a 200 response
             var block = Block();
             request(url, block.make_cb());
             response = block.wait();
             if (response.statusCode !== 200) {
-                throw new Error 'Non-200 response from ' + url + ': ' + response.statusCode + ' ' + response.body
+                throw new Error('Non-200 response from ' + url + ': ' + response.statusCode + ' ' + response.body)
             }
             
-            var comments = JSON.stringify(response.body);
+            var comments = JSON.parse(response.body);
             
             //If there are no comments, we're at the end of the pagination, so break out of the while loop
             if (comments.length === 0) { break; }
@@ -176,6 +189,10 @@ function fetchComments() {
                 ids_to_author_name[comment.id] = comment.author_name;
                 
                 timestamp = (new Date(comment.date_gmt)).valueOf();
+                if (timestamp < lt) {
+                    throw new Error('assertion error: got out-of-order timestamps');
+                }
+                lt = timestamp
                 
                 in_reply_to = []
                 
@@ -200,14 +217,22 @@ function fetchComments() {
                 //Write the comment to postgres
                 params = [comment.id, comment, timestamp, in_reply_to]
                 client.query("INSERT INTO public.comments (id, data, timestamp, in_reply_to) VALUES ($1,$2,$3,$4)", params)
+                
+                //Temporary debugging
+                //console.log('Added: ' + JSON.stringify(params, null, 4));
             }
             
             page++;
         }
-        
-        
-    
     });
+    
+    //We've successfully committed, so update the latest timestamp,
+    //and clear last error
+    latestTimestamp = lt;
+    lastError = null;
+    
+    //Temporary debugging
+    //console.log('Successfully committed');
 }
 
 
@@ -219,22 +244,25 @@ function startServer() {
 
 //Reads in the latest comments from the WordPress api, processes them,
 //and then persists them to our postgres database
-function getLatestComments {
+function getLatestComments() {
     //Kick off a synchronous coroutine
     block.run(function() {
         try {
             fetchComments();
             
             //We successfully completed, so do this again in 30 seconds
-            setTimeout(getLatestComments, 30*1000);
+            setTimeout(getLatestComments, LOAD_COMMENTS_EVERY);
         }
         catch (err) {
-            //On error, try again in 5 minutes
+            //Record the latest failure for monitoring purposes
+            lastError = err;
+        
+            //Try again in 5 minutes
             console.log('error fetching comments:');
             console.log(err.stack);
-            setTimeout(getLatestComments, 5*60*1000);
+            setTimeout(getLatestComments, FAIL_RETRY);
         }
-    }
+    });
 }
 
 

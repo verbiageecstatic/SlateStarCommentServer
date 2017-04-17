@@ -23,19 +23,19 @@ block.await = function (promise) {
 //You create a new block, you call its success or fail method from a callback,
 //and you call its wait method to asynchronously block
 function Block() {};
-block.Block = Block;
+block.Block = function () { return new Block()};
 
 //Waits for the block to finish, gets the return value
 Block.prototype.wait = function(timeout) {
     //Avoid duplicate calls to wait
-    if (this._my_fiber) { throw new Error 'already waiting' }
+    if (this._my_fiber) { throw new Error('already waiting') }
 
     var _this = this;
     if (!timeout) { timeout = 5*60*1000; }
     
     if (!this._done) {
         setTimeout(function() {
-             _this.fail(new Error 'timed out after ' + _this + ' ms');
+             _this.fail(new Error('timed out after ' + _this + ' ms'));
         }, timeout);
         
         
@@ -45,7 +45,7 @@ Block.prototype.wait = function(timeout) {
     }
     
     if (this._err) {
-        throw err;
+        throw this._err;
     }
     return this._value;
 }
