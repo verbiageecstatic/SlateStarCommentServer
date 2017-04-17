@@ -17,6 +17,9 @@
   },
   "homepage": "https://github.com/verbiageecstatic/SlateStarCommentServer#readme",
   "dependencies": {
-    "express": "^4.15.2"
+    "express": "^4.15.2",
+    "fibers": "^1.0.15",
+    "pg": "^6.1.5",
+    "request": "^2.81.0"
   }
 }

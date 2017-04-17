@@ -1,14 +1,213 @@
+//This is the main entrypoint for starting up our server.
+//If loaded as the main module, will start the server and start fetching
+//comments from wordpress.  See bottom of file for the startup code
 
-//Retrieves the latest date in the database that we have comments for
-function getFromDate(cb) {
+//Tested on node v6.10.2
 
+//Run this in an anonymous function to avoid accidentally creating global variables
+function() {
+
+//Dependencies
+var pg = require('pg');
+var fs = require('fs');
+var fibers = require('fibers');
+var block = require('./block');
+var Block = block.Block;
+var request = require('request');
+var querystring = require('querystring');
+
+
+//cache our loaded configuration
+var _config_cache; 
+
+
+//Loads our configuration from config.json.  This is a git-ignored file
+//that we use to store credentials + settings that we don't want to check
+//into git
+function get_config() {
+    //If we haven't yet, load it from disk
+    if (!_config_cache) {
+        try {
+            _config_cache = JSON.parse(fs.readFileSync('config.json', 'utf8'));
+        } catch (err) {
+            //If we can't load config, we have to shutdown
+            console.log('Unable to load and parse config.json.  Error was:');
+            console.log(err.stack);
+            process.exit(1);
+        }
+    }
+    return _config_cache;
 }
 
-//Fetches all the comments that have come in since this date,
-//and persists them to the database as a single transaction.
-//Calls back when finished  
-function fetchComments(fromDate, cb) {
 
+//store our pool of postgres clients
+var _pool_cache; 
+
+//Returns our pool of postgres clients
+function get_pool() {
+    //If we haven't created a pool yet, create it now
+    if (!_pool_cache) {
+        var postgres = get_config().postgres;
+        if (!postgres) {
+            //If we don't have settings for postgres, this is a fatal error
+            var msg = 'No "postgres" object found in config.json.  Expecting an object';
+            msg += ' with some or all of these fields: "user", "database", "password",';
+            msg += ' "host", "port", "max", "idleTimeoutMillis".  See new pg.Pool at ';
+            msg += 'https://github.com/brianc/node-postgres';
+            console.log(msg);
+            
+            process.exit(1);
+        }
+        _pool_cache = new pg.Pool(postgres);
+    }
+    return _pool_cache;
+}
+
+//Runs a function passing in a postgres client with a sync query function, which we release on completion
+function withClient(fn) {
+    var client = block.await(get_pool().connect())
+    try {
+        var c = {
+            query: function (sql, params) {
+                return block.wait(client.query(sql, params));
+            }
+        }
+        fn(c);
+    } finally {
+        client.release();
+    }
+}
+
+//Runs a function passing in a postgres client.  Starts a transaction, and automatically
+//rolls back on error or commits on success
+function transaction(fn) {
+    withClient(function(client) {
+        try {
+            client.query('BEGIN');
+            fn(client);
+            client.query('COMMIT');
+        } catch (err) {
+            client.query('ROLLBACK');
+            throw err;
+        }
+    });
+}
+
+
+//Fetches all the comments that have come in since we last fetched,
+//and persists them to the database as a single transaction.
+function fetchComments() {
+    //We run this entire operation as a transaction to protect against accidentally
+    //having two comment-fetching processes running at once
+    transaction(function(client) {
+        //Acquire a lock so that only one process does this at a time
+        client.query('SELECT pg_advisory_xact_lock(352342)');
+        
+        //Find our most recent comment, so we can get comments after that one
+        var res = client.query('SELECT timestamp FROM public.comments ORDER BY timestamp DESC LIMIT 1');
+        var start;
+        if (res.rows[0]) {
+             start = parseInt(res.rows[0].timestamp);
+        } else {
+            start = 0; //Start from the beginning of time
+        }
+        
+        //Pick an end-date.  Either the present time, or one month from the start date,
+        //whichever is earlier
+        var end = Date.now();
+        if (end - start > 30*24*60*60*1000) {
+            end = start + 30*24*60*60*1000;
+        }
+        
+        //We maintain a cache of comment ids to author names, because comments will
+        //generally be in reply to recently posted comments, so it makes sense to remember
+        //so we don't have to constantly query the database
+        var ids_to_author_name = {}
+        
+        //Given a comment id, looks up the author name
+        function getAuthorName(id) {
+            //If we have it already, just return it
+            if (ids_to_author_name[id]) {
+                return ids_to_author_name[id];
+            }
+            
+            //Otherwise, look it up from the database
+            res = client.query("SELECT data->'author_name::text as author_name FROM public.comments WHERE id = $1", [id])
+            if (!res.rows[0] || !res.rows[0].author_name) { return null; }
+            ids_to_author_name[id] = res.rows[0].author_name;
+            return ids_to_author_name[id];
+        }
+        
+        //Start from the first page of results, and go until there are no more results
+        var page = 1;
+        while (true) {
+        
+            //Build the parameters to make the call to the wordpress API
+            var url = get_config().api_base + '/wp-json/wp/v2/comments?'
+            var params = {
+                page: page,
+                per_page: 100,
+                after: (new Date(start)).toISOString(),
+                before: (new Date(end)).toISOString(),
+                order: 'asc'
+            }
+            url = url + querystring.stringify(params);
+            
+            //Do the request and error if it's not a 200 response
+            var block = Block();
+            request(url, block.make_cb());
+            response = block.wait();
+            if (response.statusCode !== 200) {
+                throw new Error 'Non-200 response from ' + url + ': ' + response.statusCode + ' ' + response.body
+            }
+            
+            var comments = JSON.stringify(response.body);
+            
+            //If there are no comments, we're at the end of the pagination, so break out of the while loop
+            if (comments.length === 0) { break; }
+            
+            //Go through each comment, calculate the timestamp and in_reply_to fields,
+            //and persist to the database
+            var comment, timestamp, in_reply_to, params;
+            for (var i = 0; i < comments.length; i++) {
+                comment = comments[i];
+                
+                //update our ids_to_author_name hash
+                ids_to_author_name[comment.id] = comment.author_name;
+                
+                timestamp = (new Date(comment.date_gmt)).valueOf();
+                
+                in_reply_to = []
+                
+                //See if there any explicit @ references
+                //Currently, we count anything from an @ to a non-alphanumeric, non-space 
+                //character as the author name.  (This is because usually they'll be a 
+                //comma or a <p> at the end of the name).
+                //We trim whitespace
+                var regex = /@([a-zA-Z0-9\. ]+)/g
+                while (match = regex.exec(comment.content.rendered)) {
+                    in_reply_to.push(match[1].trim());
+                    
+                    //TODO: can we compare unrecognized author names against our comment
+                    //database and see if we can guess who they were referring to?
+                }
+                
+                //See if there is a parent post
+                if (comment.parent && getAuthorName(comment.parent)) {
+                    in_reply_to.push(getAuthorName(comment.parent));
+                }
+                
+                //Write the comment to postgres
+                params = [comment.id, comment, timestamp, in_reply_to]
+                client.query("INSERT INTO public.comments (id, data, timestamp, in_reply_to) VALUES ($1,$2,$3,$4)", params)
+            }
+            
+            page++;
+        }
+        
+        
+    
+    });
 }
 
 
@@ -21,33 +220,34 @@ function startServer() {
 //Reads in the latest comments from the WordPress api, processes them,
 //and then persists them to our postgres database
 function getLatestComments {
-    //Get the date to start from
-    getFromDate(function(err, fromDate) {
-        if (err) { return logAndRestart(err) }
-        
-        fetchComments(fromDate, function (err) {
-            if (err) { return logAndRestart(err) }
+    //Kick off a synchronous coroutine
+    block.run(function() {
+        try {
+            fetchComments();
             
             //We successfully completed, so do this again in 30 seconds
             setTimeout(getLatestComments, 30*1000);
-        });
-    });
-}
-
-//For errors that occur during the comment fetching process, we want to log them,
-//then retry the process in 5 minutes
-function logAndRestart (err) {
-    console.log('error fetching comments:');
-    console.log(err.stack);
-    setTimeout(getLatestComments, 5*60*1000);
+        }
+        catch (err) {
+            //On error, try again in 5 minutes
+            console.log('error fetching comments:');
+            console.log(err.stack);
+            setTimeout(getLatestComments, 5*60*1000);
+        }
+    }
 }
 
 
 //If this file is the entry point, start up our server and begin 
 //fetching comments
-if (require.main is module) {
+if (require.main === module) {
+    //Confirm we've configured an api base url
+    if (!get_config().api_base) {
+        console.log('Please set "api_base" in config.json.  E.g., http://slatestarcodex.com');
+        process.exit(1);
+    }
+
     startServer();
-    
     getLatestComments();
     
     //if we have an uncaught exception, we want to log it (but not immediately exit)
@@ -56,3 +256,5 @@ if (require.main is module) {
         console.log(err.stack);
     });
 }
+
+})()
