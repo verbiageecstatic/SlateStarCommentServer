@@ -13,13 +13,13 @@ We are monitoring the status here: http://stats.pingdom.com/at8g7vi1e72k
 
 To fetch replies for a user, query http://ec2-52-15-236-75.us-east-2.compute.amazonaws.com/replies.  This endpoint takes the following query string parameters:
 
-author_name: (required) the name of the author to fetch replies for
+`author_name` (required) the name of the author to fetch replies for
 
-from: (required) a unix timestamp in ms to fetch replies after
+`from` (required) a unix timestamp in ms to fetch replies after
 
-page_size: (defaults to 10) the number of replies to return.  replies are returned in ascending chronological order, starting from "from".
+`page_size` (defaults to 10) the number of replies to return.  replies are returned in ascending chronological order, starting from "from".
 
-page: (defaults to 1) which page of replies to return, in "page_size" chunks.
+`page` (defaults to 1) which page of replies to return, in "page_size" chunks.
 
 This endpoint returns an array of comments in the same format as returned by the Wordpress API's comments endpoint (documented here: https://developer.wordpress.org/rest-api/reference/comments/).
 
