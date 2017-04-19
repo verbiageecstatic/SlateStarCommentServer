@@ -7,9 +7,9 @@ This is a server that queries WordPress's api, fetches the list of comments, and
 
 ## Endpoints
 
-You can check the comment-fetching processes' status here: http://ec2-52-15-236-75.us-east-2.compute.amazonaws.com/
+You can check the status of the comment-fetching process here: http://ec2-52-15-236-75.us-east-2.compute.amazonaws.com/
 
-We are monitoring the status here: http://stats.pingdom.com/at8g7vi1e72k
+And see a report on its uptime here: http://stats.pingdom.com/at8g7vi1e72k
 
 To fetch replies for a user, query http://ec2-52-15-236-75.us-east-2.compute.amazonaws.com/replies.  This endpoint takes the following query string parameters:
 
