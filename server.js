@@ -231,7 +231,11 @@ function fetchComments() {
     
     //We've successfully committed, so update the latest timestamp,
     //and clear last error
-    latestTimestamp = lt;
+    if (lt === null) {
+        latestTimestamp = 'up-to-date';
+    } else {
+        latestTimestamp = lt;
+    }
     lastError = null;
     
     //Temporary debugging
@@ -249,7 +253,9 @@ function statusEndpoint (req, res, next) {
         } else {
             msg += 'starting up'
         }
-        if (latestTimestamp) {
+        if (latestTimestamp === 'up-to-date') {
+            msg += '\n\n\nCaught up to the present time'
+        } else if (latestTimestamp) {
             msg += '\n\n\nCaught up to: ' + String(new Date(latestTimestamp))
         }
         res.end(msg);
