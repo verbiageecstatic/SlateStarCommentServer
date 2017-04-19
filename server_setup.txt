@@ -1,0 +1,41 @@
+#Commands I ran to initialize the AWS EC2 instance to host this
+
+
+#Install git
+yum install git
+
+#Install node
+curl -L https://git.io/n-install | bash
+. ~/.bashrc
+n 6.10.2
+
+#Install supervisord
+sudo pip install supervisor
+echo_supervisord_conf > tmp
+sudo su -c'mv tmp /etc/supervisord.conf'
+
+#Checkout the repo and install
+git clone https://github.com/verbiageecstatic/SlateStarCommentServer.git
+cd SlateStarCommentServer
+npm install
+
+#Create a config.json (setting our port to 8080, and entering the credentials for our database)
+
+
+#Edit /etc/supervisord.conf and add the following:
+[program:ssc]
+command=node /home/ec2-user/SlateStarCommentServer/server.js
+directory=/home/ec2-user/SlateStarCommentServer
+
+
+#On server start, we want to:
+#a) Map port 8080 -> 80 so we can run the server without being root
+#b) start supervisord
+#So, edit /etc/rc.local and add:
+
+sudo -u ec2-user -H sh -c "export PATH=/usr/local/bin:/bin:/usr/bin:/usr/local/sbin:/usr/sbin:/sbin:/opt/aws/bin:/home/ec2-user/n/bin:/home/ec2-user/.local/bin:/home/ec2-user/bin; supervisord" 
+sudo iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 8080
+
+#then restart the server and see if it works...
+
+
