@@ -29,12 +29,13 @@ directory=/home/ec2-user/SlateStarCommentServer
 
 
 #On server start, we want to:
-#a) Map port 8080 -> 80 so we can run the server without being root
+#a) Map port 8080 -> 80 and 8043 -> 443 so we can run the server without being root
 #b) start supervisord
 #So, edit /etc/rc.local and add:
 
 sudo -u ec2-user -H sh -c "export PATH=/usr/local/bin:/bin:/usr/bin:/usr/local/sbin:/usr/sbin:/sbin:/opt/aws/bin:/home/ec2-user/n/bin:/home/ec2-user/.local/bin:/home/ec2-user/bin; supervisord" 
 sudo iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 8080
+sudo iptables -t nat -A PREROUTING -p tcp --dport 443 -j REDIRECT --to-port 8043
 
 #then restart the server and see if it works...
 
