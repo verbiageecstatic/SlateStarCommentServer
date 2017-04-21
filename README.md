@@ -7,11 +7,11 @@ This is a server that queries WordPress's api, fetches the list of comments, and
 
 ## Endpoints
 
-You can check the status of the comment-fetching process here: http://ec2-52-15-236-75.us-east-2.compute.amazonaws.com/
+You can check the status of the comment-fetching process here: https://sscnotify.bakkot.com/
 
 And see a report on its uptime here: http://stats.pingdom.com/at8g7vi1e72k
 
-To fetch replies for a user, query http://ec2-52-15-236-75.us-east-2.compute.amazonaws.com/replies.  This endpoint takes the following query string parameters:
+To fetch replies for a user, query https://sscnotify.bakkot.com/replies.  This endpoint takes the following query string parameters:
 
 `author_name` (required) the name of the author to fetch replies for
 
@@ -23,4 +23,4 @@ To fetch replies for a user, query http://ec2-52-15-236-75.us-east-2.compute.ama
 
 This endpoint returns an array of comments in the same format as returned by the Wordpress API's comments endpoint (documented here: https://developer.wordpress.org/rest-api/reference/comments/).
 
-For example, to return 10 replies to Scott's comments on Sept 1, 2014, you would visit: http://ec2-52-15-236-75.us-east-2.compute.amazonaws.com/replies?author_name=Scott%20Alexander&from=1409591958000
+For example, to return 10 replies to Scott's comments on Sept 1, 2014, you would visit: https://sscnotify.bakkot.com/replies?author_name=Scott%20Alexander&from=1409591958000
