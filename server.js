@@ -271,6 +271,10 @@ function replies(req, res, next) {
     //Run this on a synchronous coroutine to enable waiting
     block.run(function() {
         try {
+            //set headers
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Access-Control-Allow-Credentials', 'true');
+        
             //Parse the querystring.  We support author_name, from, page
             var params, author_name, from, page, page_size;
             params = url.parse(req.url, true).query;
