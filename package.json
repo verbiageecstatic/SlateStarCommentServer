@@ -19,6 +19,7 @@
   "dependencies": {
     "express": "^4.15.2",
     "fibers": "^1.0.15",
+    "greenlock-express": "^2.0.10",
     "pg": "^6.1.5",
     "request": "^2.81.0"
   }

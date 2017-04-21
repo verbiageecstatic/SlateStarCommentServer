@@ -17,6 +17,7 @@ var request = require('request');
 var querystring = require('querystring');
 var express = require('express');
 var url = require('url')
+var greenlock_express = require('greenlock-express');
 
 //How soon we kick off the loading-new-comments process after the last one finishes
 var LOAD_COMMENTS_EVERY = 10*1000;
@@ -352,15 +353,47 @@ function startServer() {
     //install the status endpoint
     app.get('/', statusEndpoint);
     
-    port = get_config().port;
-    app.listen(port, function(err) {
-        if (err) {
-            console.log('Unable to listen on port ' + port + ': ');
-            console.log(err);
+    var port = get_config().port;
+    
+    
+    //If we have a an ssl_port defined in our configuration, set up ssl
+    //using LetsEncrypt
+    var ssl_port = get_config().ssl_port;
+    if (ssl_port) {
+        var letsEncrypt = get_config().letsEncrypt;
+        if (!letsEncrypt) {
+            console.log('SSL port specified, but no letsEncrypt settings: expected: domain, prod, email');
             process.exit(1);
         }
-        console.log('Listening on port ' + port);
-    });
+        var server;
+        if (letsEncrypt.prod) {
+            server = 'https://acme-v01.api.letsencrypt.org/directory'
+        } else {
+            server = 'staging';
+            console.log('using letsencrypt staging server -- switch to prod when ready');
+        }
+        
+        //Create a LetsEncrypt wrapper and host it on our http and https port
+        greenlock_express.create({
+            server: server,
+            email: letsEncrypt.email,
+            agreeTos: true,
+            approveDomains: [letsEncrypt.domain],
+            app: app
+        }).listen(port, ssl_port);
+    
+    } else {    
+        app.listen(port, function(err) {
+            if (err) {
+                console.log('Unable to listen on port ' + port + ': ');
+                console.log(err);
+                process.exit(1);
+            }
+            console.log('Listening on port ' + port);
+        });
+    }
+    
+
 }
 
 
