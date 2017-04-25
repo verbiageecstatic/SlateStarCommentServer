@@ -98,7 +98,7 @@ function withClient(fn) {
 //Runs a function passing in a postgres client.  Starts a transaction, and automatically
 //rolls back on error or commits on success
 function transaction(fn) {
-    withClient(function(client) {
+    return withClient(function(client) {
         try {
             client.query('BEGIN');
             ret = fn(client);
@@ -420,17 +420,20 @@ var send = endpoint(function(req, res) {
             return;
         }
         
-        //And clear them in 24 hours
-        setTimeout(function() { 
-            delete lastSend[email];
-            totalEmails[email];
-        }, 24*60*60*1000);
+        //See if we already have a subscription; if so, abort
+        var alreadySubscribed = withClient(function(client) {
+            return client.query('SELECT 1 FROM public.subscriptions WHERE email = $1 and author_name = $2', [email, author_name]).rows.length > 0;
+        });
+        if (alreadySubscribed) {
+            res.end('You are already subscribed!');
+            return
+        }
         
-        //Generate a token to prove ownership of the email and save it to the database
-        //with a 24 hour expiration
-        var token = createToken();
-        var expiration = Date.now() + 24*60*60*1000;
         withClient(function(client) {
+            //Generate a token to prove ownership of the email and save it to the database
+            //with a 24 hour expiration
+            var token = createToken();
+            var expiration = Date.now() + 24*60*60*1000;
             client.query('INSERT INTO public.tokens (id, email, expiration) VALUES ($1, $2, $3)', [token, email, expiration])
         });
         
@@ -440,6 +443,12 @@ var send = endpoint(function(req, res) {
         //Update lastSend and totalEmails
         lastSend[email] = Date.now();
         totalEmails[email] = totalEmails[email] ? totalEmails[email] + 1 : 1;
+        
+        //And clear them in 24 hours
+        setTimeout(function() { 
+            delete lastSend[email];
+            totalEmails[email];
+        }, 24*60*60*1000);
         
         //Update rate limiting counter
         fromIP[req.ip]++;
@@ -481,9 +490,10 @@ var verify = endpoint(function(req, res) {
         
         var email = results.rows[0].email;
         
-        //Create the subscription
+        //Create the subscription.  If it already exists, do nothing
         var id = createToken();
-        client.query('INSERT INTO public.subscriptions (id, email, author_name) VALUES ($1, $2, $3)', [id, email, author_name]);
+        var sql = 'INSERT INTO public.subscriptions (id, email, author_name) VALUES ($1, $2, $3) ON CONFLICT (email, author_name) DO NOTHING';
+        client.query(sql, [id, email, author_name]);
     });
     
     res.end('Thanks, your email address has been verified!  You will now start receiving replies.  To unsubscribe, just click the link in the bottom of any email.');

@@ -39,3 +39,6 @@ CREATE TABLE public.subscriptions (
     email text,                 --The email to send replies to
     author_name text            --The author_name to send replies for.
 );
+
+--Enforce only one subscription per email / author_name pairing
+CREATE UNIQUE INDEX email_author_name on public.subscriptions (email, author_name);
