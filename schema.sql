@@ -11,7 +11,7 @@
 --names of users we consider this comment to be replying to (we support more than one
 --in order to enable @-replies)
 --
-CREATE TABLE public.comments(
+CREATE TABLE public.comments (
     id bigint PRIMARY KEY,      --The id assigned to the comment in postgres
     data jsonb,                 --The full output from the wordpress API
     timestamp bigint,           --timestamp in ms when this comment was posted
@@ -24,3 +24,18 @@ CREATE INDEX comments_by_timestamp on public.comments (timestamp);
 
 --Support chronological traversal of a specific author's comments
 CREATE INDEX comments_by_author on public.comments ((data->'author_name'), timestamp);
+
+
+--Stores tokens that prove ownership of an email address
+CREATE TABLE public.tokens (
+    id text PRIMARY KEY,        --The token
+    email text,                 --The email it was generated for
+    expiration bigint           --The date the token is valid for
+);
+
+--Stores subscriptions for a given email to a given author_name's replies
+CREATE TABLE public.subscriptions (
+    id text PRIMARY KEY,        --The id of the subscription (used as the unsubscribe token)
+    email text,                 --The email to send replies to
+    author_name text            --The author_name to send replies for.
+);

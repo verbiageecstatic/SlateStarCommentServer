@@ -18,6 +18,8 @@ var querystring = require('querystring');
 var express = require('express');
 var url = require('url')
 var greenlock_express = require('greenlock-express');
+var bodyParser = require('body-parser')
+var crypto = require('crypto')
 
 //How soon we kick off the loading-new-comments process after the last one finishes
 var LOAD_COMMENTS_EVERY = 10*1000;
@@ -267,79 +269,238 @@ function statusEndpoint (req, res, next) {
     }
 }
 
-//Express route that returns a JSON list of replies
-function replies(req, res, next) {
-    //Run this on a synchronous coroutine to enable waiting
-    block.run(function() {
+//Given a (req, res) function, returns
+//an Express endpoint that runs it on a synchronous
+//co-routine and handles errors
+function endpoint(fn) {
+    return function (req, res, next) {
         try {
-            //set headers
-            res.setHeader('Access-Control-Allow-Origin', '*');
-            res.setHeader('Access-Control-Allow-Credentials', 'true');
-        
-            //Parse the querystring.  We support author_name, from, page
-            var params, author_name, from, page, page_size;
-            params = url.parse(req.url, true).query;
-            author_name = params.author_name;
-            from = parseInt(params.from);
-            if (params.page) {
-                page = parseInt(params.page);
-            } else {
-                page = 1;
-            }
-            if (params.page_size) {
-                page_size = parseInt(params.page_size);
-            } else {
-                page_size = 10;
-            }
-            
-            //Sends a 400 message to the client
-            function return400 (msg) {
-                res.statusCode = 400;
-                res.end(msg);
-            }
-            
-            //Validate the parameters
-            if (!author_name) {
-                return return400('Missing "author_name" parameter in querystring');
-            }
-            if (Number.isNaN(from)) {
-                return return400('Invalid or missing "from" paramater: should be a unix timestamp in miliseconds');
-            }
-            if (Number.isNaN(page) || page < 1) {
-                return return400('Invalid "page" parameter: should be an integer >= 1');
-            }
-            if (Number.isNaN(page_size) || page_size < 1 || page_size > 100) {
-                return return400('Invalid "page_size" parameter: should be an integer between 1 and 100');
-            }
-            
-            //Get a postgres client and do a search for comments that match these parameters
-            var rows = withClient(function(client) {
-                var limit, offset;
-                //Currently we return at most 100 replies per call
-                limit = page_size;
-                offset = limit * (page - 1);
-                
-                sql = "SELECT data FROM public.comments WHERE in_reply_to @> ARRAY[$1] AND timestamp > $2 ORDER BY timestamp LIMIT $3 OFFSET $4";
-                
-                return client.query(sql, [author_name, from, limit, offset]).rows;
-            });
-            
-            //Build the results to return to the client
-            var results = [];
-            for (var i = 0; i < rows.length; i++) {
-                results.push(rows[i].data);
-            }
-            
-            //And send them
-            res.end(JSON.stringify(results));
-        
-        } catch (err) {
+            fn(req, res);
+        }
+        catch (err) {
             //On error, log it, then return to the client
             console.log('Error handling ' + req.url + ':');
             console.log(err.stack);
             next(err);
-        } 
+        }
+    }
+}
+
+//Express route that returns a JSON list of replies
+var replies = endpoint(function(req, res) {
+    //set headers
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+
+    //Parse the querystring.  We support author_name, from, page
+    var params, author_name, from, page, page_size;
+    params = url.parse(req.url, true).query;
+    author_name = params.author_name;
+    from = parseInt(params.from);
+    if (params.page) {
+        page = parseInt(params.page);
+    } else {
+        page = 1;
+    }
+    if (params.page_size) {
+        page_size = parseInt(params.page_size);
+    } else {
+        page_size = 10;
+    }
+    
+    //Sends a 400 message to the client
+    function return400 (msg) {
+        res.statusCode = 400;
+        res.end(msg);
+    }
+    
+    //Validate the parameters
+    if (!author_name) {
+        return return400('Missing "author_name" parameter in querystring');
+    }
+    if (Number.isNaN(from)) {
+        return return400('Invalid or missing "from" paramater: should be a unix timestamp in miliseconds');
+    }
+    if (Number.isNaN(page) || page < 1) {
+        return return400('Invalid "page" parameter: should be an integer >= 1');
+    }
+    if (Number.isNaN(page_size) || page_size < 1 || page_size > 100) {
+        return return400('Invalid "page_size" parameter: should be an integer between 1 and 100');
+    }
+    
+    //Get a postgres client and do a search for comments that match these parameters
+    var rows = withClient(function(client) {
+        var limit, offset;
+        //Currently we return at most 100 replies per call
+        limit = page_size;
+        offset = limit * (page - 1);
+        
+        sql = "SELECT data FROM public.comments WHERE in_reply_to @> ARRAY[$1] AND timestamp > $2 ORDER BY timestamp LIMIT $3 OFFSET $4";
+        
+        return client.query(sql, [author_name, from, limit, offset]).rows;
     });
+    
+    //Build the results to return to the client
+    var results = [];
+    for (var i = 0; i < rows.length; i++) {
+        results.push(rows[i].data);
+    }
+    
+    //And send them
+    res.end(JSON.stringify(results));
+});
+
+//Subscription html page
+var HTML = '<html><head><title>SSC Comment Subscriptions</title></head>\n';
+HTML += "<body><h3>Subscribe to replies to {author_name}'s comments</h3>\n'
+HTML += "<p>If you sign up, you will get an email whenever someone replies to one of {author_name}'s comments,\n"
+HTML += 'or includes "@{author_name}" in their comment.  (Comments within a short timespan of each other will be\n
+HTML += 'sent in a single email).  You can unsubscribe at any time by clicking a link in the bottom of the notification\n
+HTML += 'email.  Please enter your email address to continue:\n</p>'
+HTML += '<form method="POST" action="send" enctype="application/x-www-form-urlencoded">\n'
+HTML += '<input type="hidden" name="author_name" value="{author_name}"></input>\n'
+HTML += '<input type="email" placeholder="email" name="email"></input></form></body></html>'
+
+//Express route that renders the subscription html for a given author_name
+function subscribe(req, res) {
+    //Extract author_name from the querystring
+    var params, author_name;
+    params = url.parse(req.url, true).query;
+    author_name = params.author_name;
+    
+    //If missing, send an error
+    if (!author_name) {
+        res.statusCode = 400;
+        res.end('Missing "author_name" parameter in querystring');
+        return
+    }  
+    
+    return HTML.replace(/{author_name}/g, author_name);
+}
+
+//Generates a random token
+function createToken() { return crypto.randomBytes(20).toString('hex'); }
+
+//Track the last time we sent a subscription email to an address
+var lastSend = {};
+
+//Track the number of subscription emails to an address
+var totalEmails = {};
+
+//Track the total number of subscription emails from this ip
+var fromIP = {};
+
+//Express route called by subscription page to send the email verification
+var send = endpoint(function(req, res)
+    //Extract the author_name and email and send a 400 if either are missing
+    var author_name = req.body.author_name;
+    var email = req.body.email;
+    if (!author_name || !email} {
+        res.statusCode = 400;
+        res.end('Missing form data: author_name or email');
+        return;
+    }
+    
+    //Check if we've already recently sent a subscription email to this address.  If so, no need to send again
+    //We define already sent as 30 seconds * 2 ^ number of emails we've already sent to this address
+    var alreadySent = lastSend[email] && (Date.now() - lastSend[email] < Math.pow(2, totalEmails[email]) * 30000)
+    if (!alreadySent) {
+    
+        //Rate limit IP addresses to 20 requests per 24 hours
+        fromIP[req.ip] = fromIP[req.ip] || 0;
+        if (fromIP[req.ip] > 20) {
+            res.statusCode = 503;
+            res.end('Too many requests');
+            return;
+        }
+        fromIP[req.ip]++;
+        setTimeout(function() { 
+            fromIP[req.ip]--; 
+            if (fromIP[req.ip] === 0) { delete fromIP[req.ip]; }
+        }, 24*60*60*1000);
+        
+        //Update lastSend and totalEmails
+        lastSend[email] = Date.now();
+        totalEmails[email] = totalEmails[email] ? totalEmails[email] + 1 : 1;
+        
+        //And clear them in 24 hours
+        setTimeout(function() { 
+            delete lastSend[email];
+            totalEmails[email];
+        }, 24*60*60*1000);
+        
+        //Generate a token to prove ownership of the email and save it to the database
+        //with a 24 hour expiration
+        var token = createToken();
+        var expiration = Date.now() + 24*60*60*1000;
+        withClient(function(client) {
+            client.query('INSERT INTO public.tokens (id, email, expiration) VALUES ($1, $2, $3)', [token, email, expiration])
+        });
+        
+        //Actually send the email
+        console.log('TODO: send email for ' + email + ' ' + author_name + ' with token ' + token);
+    }
+    
+    //Indicate success
+    res.end('Verification email sent to ' + email + '.  Check your email to finish the signup process');
+});
+
+//Express route called from within an email that verifies ownership and creates
+//the subscription
+var verify = endpoint(function(req, res) {
+    //Extract author_name and token from the querystring
+    var params, author_name, token;
+    params = url.parse(req.url, true).query;
+    author_name = params.author_name;
+    token = params.token;
+    
+    //Validate we have them
+    if (!author_name || !token) {
+        res.statusCode = 400;
+        res.end('Oops, it looks like you did not copy the full link from the email... some information got cut off!');
+        return
+    }
+    
+    //In a transaction, verify the token and create the subscription
+    transaction(function(client) {
+        results = client.query("DELETE FROM public.tokens WHERE id = $1 RETURNING email, expiration", [token]);
+        //make sure a) we found the token, and b) it's not expired
+        if (results.rows.length < 1 || results.rows[0].expiration < Date.now()) {
+            res.statusCode = 400;
+            res.end('Oops, it looks like this verification request is expired.  Please send a new request!');
+            return
+        }
+        
+        var email = results.rows[0].email;
+        
+        //Create the subscription
+        var id = createToken();
+        client.query('INSERT INTO public.subscriptions (id, email, author_name) VALUES ($1, $2, $3)', [id, email, author_name]);
+    });
+    
+    res.end('Thanks, your email address has been verified!  You will now start receiving replies.  To unsubscribe, just click the link in the bottom of any email.');
+});
+
+//Express route for unsubscribing from an email subscription
+function unsubscribe(req, res) {
+    //Extract the subscription id and email from the query string
+    var params, id, email;
+    params = url.parse(req.url, true).query;
+    id = params.id;
+    email = params.email;
+    
+    if (!id || !email) {
+        res.statusCode = 400;
+        res.end('Oops, it looks like you did not copy the full link from the email... some information got cut off!');
+    }
+    
+    //Delete the subscription with that id and email
+    withClient(function(client) {
+        client.query('DELETE FROM public.subscriptions WHERE id = $1 and email = $2', [id, email]);
+    });
+    
+    //Report success
+    res.end('Email ' + email + ' has been unsubscribed from these notifications');
 }
 
 
@@ -347,10 +508,12 @@ function replies(req, res, next) {
 function startServer() {
     var app = express();
     
-    //install the replies endpoint
+    //install the various endpoints:
+    app.use(bodyParser.urlencoded({extended: false}));
     app.get('/replies', replies);
-    
-    //install the status endpoint
+    app.get('/subscribe', subscribe);
+    app.post('/send', send);
+    app.get('/unsubscribe', unsubscribe);
     app.get('/', statusEndpoint);
     
     var port = get_config().port;
