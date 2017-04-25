@@ -274,15 +274,17 @@ function statusEndpoint (req, res, next) {
 //co-routine and handles errors
 function endpoint(fn) {
     return function (req, res, next) {
-        try {
-            fn(req, res);
-        }
-        catch (err) {
-            //On error, log it, then return to the client
-            console.log('Error handling ' + req.url + ':');
-            console.log(err.stack);
-            next(err);
-        }
+        block.run(function() {
+            try {
+                fn(req, res);
+            }
+            catch (err) {
+                //On error, log it, then return to the client
+                console.log('Error handling ' + req.url + ':');
+                console.log(err.stack);
+                next(err);
+            }
+        });
     }
 }
 
@@ -352,14 +354,18 @@ var replies = endpoint(function(req, res) {
 
 //Subscription html page
 var HTML = '<html><head><title>SSC Comment Subscriptions</title></head>\n';
-HTML += "<body><h3>Subscribe to replies to {author_name}'s comments</h3>\n'
-HTML += "<p>If you sign up, you will get an email whenever someone replies to one of {author_name}'s comments,\n"
-HTML += 'or includes "@{author_name}" in their comment.  (Comments within a short timespan of each other will be\n
-HTML += 'sent in a single email).  You can unsubscribe at any time by clicking a link in the bottom of the notification\n
-HTML += 'email.  Please enter your email address to continue:\n</p>'
-HTML += '<form method="POST" action="send" enctype="application/x-www-form-urlencoded">\n'
-HTML += '<input type="hidden" name="author_name" value="{author_name}"></input>\n'
-HTML += '<input type="email" placeholder="email" name="email"></input></form></body></html>'
+HTML += "<body><h3>SSC Comment Subscriptions</h3>\n";
+HTML += '<p>Name: {author_name}</p>\n'
+HTML += "<p>Sign up to get an email whenever someone replies to one of {author_name}'s comments,\n";
+HTML += 'or includes "@{author_name}" in their comment text.</p>\n';
+HTML += '<p>Comments within a short timespan of each other will be sent in a single email.</p>\n';
+HTML += '<p>You can unsubscribe at any time by clicking a link in the bottom of the notification ';
+HTML += 'email.  Please enter your email address to continue:\n</p>';
+HTML += '<form method="POST" action="send" enctype="application/x-www-form-urlencoded">\n';
+HTML += '<input type="hidden" name="author_name" value="{author_name}"></input>\n';
+HTML += '<p><input type="email" placeholder="email" name="email"></input></p>\n';
+HTML += '<p><input type="submit"></input></p>\n';
+HTML += '</form></body></html>';
 
 //Express route that renders the subscription html for a given author_name
 function subscribe(req, res) {
@@ -375,7 +381,7 @@ function subscribe(req, res) {
         return
     }  
     
-    return HTML.replace(/{author_name}/g, author_name);
+    res.end(HTML.replace(/{author_name}/g, author_name));
 }
 
 //Generates a random token
@@ -391,11 +397,11 @@ var totalEmails = {};
 var fromIP = {};
 
 //Express route called by subscription page to send the email verification
-var send = endpoint(function(req, res)
+var send = endpoint(function(req, res) {
     //Extract the author_name and email and send a 400 if either are missing
     var author_name = req.body.author_name;
     var email = req.body.email;
-    if (!author_name || !email} {
+    if (!author_name || !email) {
         res.statusCode = 400;
         res.end('Missing form data: author_name or email');
         return;
@@ -413,15 +419,6 @@ var send = endpoint(function(req, res)
             res.end('Too many requests');
             return;
         }
-        fromIP[req.ip]++;
-        setTimeout(function() { 
-            fromIP[req.ip]--; 
-            if (fromIP[req.ip] === 0) { delete fromIP[req.ip]; }
-        }, 24*60*60*1000);
-        
-        //Update lastSend and totalEmails
-        lastSend[email] = Date.now();
-        totalEmails[email] = totalEmails[email] ? totalEmails[email] + 1 : 1;
         
         //And clear them in 24 hours
         setTimeout(function() { 
@@ -439,6 +436,17 @@ var send = endpoint(function(req, res)
         
         //Actually send the email
         console.log('TODO: send email for ' + email + ' ' + author_name + ' with token ' + token);
+        
+        //Update lastSend and totalEmails
+        lastSend[email] = Date.now();
+        totalEmails[email] = totalEmails[email] ? totalEmails[email] + 1 : 1;
+        
+        //Update rate limiting counter
+        fromIP[req.ip]++;
+        setTimeout(function() { 
+            fromIP[req.ip]--; 
+            if (fromIP[req.ip] === 0) { delete fromIP[req.ip]; }
+        }, 24*60*60*1000);
     }
     
     //Indicate success
