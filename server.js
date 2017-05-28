@@ -194,6 +194,8 @@ function fetchComments() {
             
             var comments = JSON.parse(response.body);
             
+            console.log(response.body);
+            
             //Temporary debugging
             console.log('Found ' + comments.length + ' comments');
             
