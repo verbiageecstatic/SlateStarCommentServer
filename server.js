@@ -184,14 +184,13 @@ function fetchComments() {
             }
             url = url + querystring.stringify(params);
             
-            //Temporary debugging:
-            console.log('Fetching ' + url);
-            
             //Do the request and error if it's not a 200 response
             //For some bizarre reason, I get weird results using the built-in node request
             //module, so using curl...
             block = Block();
-            child_process.exec("curl '" + url + "'", block.make_cb());
+            var cmd = "curl '" + url + "'"
+            console.log(cmd);
+            child_process.exec(cmd, block.make_cb());
             response = block.wait();
             
             comments = JSON.parse(response);
