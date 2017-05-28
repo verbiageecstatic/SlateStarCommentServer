@@ -429,16 +429,18 @@ var send = endpoint(function(req, res) {
             return
         }
         
+        var token = createToken();
+        
         withClient(function(client) {
             //Generate a token to prove ownership of the email and save it to the database
             //with a 24 hour expiration
-            var token = createToken();
             var expiration = Date.now() + 24*60*60*1000;
             client.query('INSERT INTO public.tokens (id, email, expiration) VALUES ($1, $2, $3)', [token, email, expiration])
         });
         
         //Actually send the email
-        console.log('TODO: send email for ' + email + ' ' + author_name + ' with token ' + token);
+        var tokenUrl = req.hostname + '/verify?' + querystring.stringify({author_name: author_name, token: token});
+        sendVerificationEmail(email, author_name, tokenUrl);
         
         //Update lastSend and totalEmails
         lastSend[email] = Date.now();
@@ -461,6 +463,42 @@ var send = endpoint(function(req, res) {
     //Indicate success
     res.end('Verification email sent to ' + email + '.  Check your email to finish the signup process');
 });
+
+
+//Sends an email to verify that this email address wants to subscribe to author_name's comments
+function sendVerificationEmail(email, author_name, tokenUrl) {
+    var subject = '[SSC Comments] Subscribe to SSC Comment Replies for ' + author_name;
+    var html = '<p>Someone (you, we hope), requested that ' + email + ' be subscribed to replies to ';
+    html += author_name + "'s comments on Slate Star Codex.</p>";
+    html += '<p>If this is correct, <a href="' + tokenUrl + '">please click here to confirm</a>.</p>';
+    var from = get_config().email;
+    var domain = from.split('@')[1];
+    var from = 'SSC Comments <' + from + '>';
+    var url = 'https://api.mailgun.net/v3/' + domain + '/messages';
+    
+    var block = Block()
+    request({
+        url: url,
+        method: 'POST',
+        auth: {
+            user: 'api',
+            pass: get_config().mailgun_secret,
+            sendImmediately: true
+        },
+        form: {
+            from: from,
+            to: email,
+            subject: subject,
+            html: html
+        }
+    }, block.make_cb());
+    response = block.wait();
+    
+    if (response.statusCode < 200 || response.statusCode > 299) {
+        throw new Error('Failed sending to Mailgun: ' + response.statusCode + '\n' + response.body);
+    }
+    
+}
 
 //Express route called from within an email that verifies ownership and creates
 //the subscription
@@ -530,6 +568,7 @@ function startServer() {
     app.use(bodyParser.urlencoded({extended: false}));
     app.get('/replies', replies);
     app.get('/subscribe', subscribe);
+    app.get('/verify', verify);
     app.post('/send', send);
     app.get('/unsubscribe', unsubscribe);
     app.get('/', statusEndpoint);
@@ -613,6 +652,16 @@ if (require.main === module) {
     //Confirm we've configured a port to listen on
     if (!get_config().port) {
         console.log('Please set "port" in config.json. E.g., 80.');
+        process.exit(1);
+    }
+    //Confirm we've configured an email to send from
+    if (!get_config().email) {
+        console.log('Please set "email" in config.json. E.g., "test@test.com".');
+        process.exit(1);
+    }
+    //Confirm we've configured a mailgun secret
+    if (!get_config().mailgun_secret) {
+        console.log('Please set "mailgun_secret" in config.json.');
         process.exit(1);
     }
 
