@@ -696,7 +696,7 @@ function doSendEmails() {
         
         //And save it
         if (endTime) {
-            client.query('UPDATE current_email_status SET timestamp = $1 WHERE id = 0')
+            client.query('UPDATE current_email_status SET timestamp = $1 WHERE id = 0', [endTime])
         }
         
         //We end the transaction here, prior to sending the emails, since it's probably
