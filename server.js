@@ -14,6 +14,7 @@ var fibers = require('fibers');
 var block = require('./block');
 var Block = block.Block;
 var request = require('request');
+var child_process = require('child_process')
 var querystring = require('querystring');
 var express = require('express');
 var url = require('url')
@@ -185,8 +186,10 @@ function fetchComments() {
             console.log('Fetching ' + url);
             
             //Do the request and error if it's not a 200 response
+            //For some bizarre reason, I get weird results using the built-in node request
+            //module, so using curl...
             var block = Block();
-            request(url, block.make_cb());
+            child_process.exec('curl ' + url, block.make_cb());
             response = block.wait();
             if (response.statusCode !== 200) {
                 throw new Error('Non-200 response from ' + url + ': ' + response.statusCode + ' ' + response.body)
@@ -194,9 +197,8 @@ function fetchComments() {
             
             var comments = JSON.parse(response.body);
             
-            console.log(response.body);
-            
             //Temporary debugging
+            console.log(response.body);
             console.log('Found ' + comments.length + ' comments');
             
             //If there are no comments, we're at the end of the pagination, so break out of the while loop
