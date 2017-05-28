@@ -191,14 +191,11 @@ function fetchComments() {
             var block = Block();
             child_process.exec('curl ' + url, block.make_cb());
             response = block.wait();
-            if (response.statusCode !== 200) {
-                throw new Error('Non-200 response from ' + url + ': ' + response.statusCode + ' ' + response.body)
-            }
             
-            var comments = JSON.parse(response.body);
+            var comments = JSON.parse(response);
             
             //Temporary debugging
-            console.log(response.body);
+            console.log(response);
             console.log('Found ' + comments.length + ' comments');
             
             //If there are no comments, we're at the end of the pagination, so break out of the while loop
