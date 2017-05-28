@@ -115,6 +115,13 @@ function transaction(fn) {
     });
 }
 
+//Generates an ISO string in the timezone that wordpress is in, since its API
+//doesn't support time zone notation or GMT dates... grrr.
+function toWordpressDate(timestamp) {
+    timestamp += get_config().gmt_offset * 60 * 60 * 1000;
+    var text = (new Date(timestamp)).toISOString();
+    return text.split('.')[0];
+}
 
 //Fetches all the comments that have come in since we last fetched,
 //and persists them to the database as a single transaction.
@@ -169,7 +176,7 @@ function fetchComments() {
             var params = {
                 page: page,
                 per_page: 100,
-                after: (new Date(start)).toISOString(),
+                after: toWordpressDate(start),
                 order: 'asc'
             }
             url = url + querystring.stringify(params);
@@ -796,6 +803,10 @@ if (require.main === module) {
     if (!get_config().hostname) {
         console.log('Please set "hostname" in config.json (e.g., "www.myhost.com")')
         process.exit(1)
+    }
+    //Confirms we've configured the offset for the wordpress api's time zone
+    if (!get_config().gmt_offset) {
+        console.log('Please set "gmt_offset" in config.json (the number of hours to add to GMT to get to the wordpress timezone)')
     }
 
     startServer();
