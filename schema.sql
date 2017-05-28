@@ -42,3 +42,12 @@ CREATE TABLE public.subscriptions (
 
 --Enforce only one subscription per email / author_name pairing
 CREATE UNIQUE INDEX email_author_name on public.subscriptions (email, author_name);
+
+--Look up subscriptions by author_name
+CREATE INDEX subscriptions_by_author ON public.subscriptions (author_name);
+
+--A one-row table indicated the timestamp through which we've sent email notifications
+CREATE TABLE public.current_email_status (
+    id int PRIMARY KEY,
+    timestamp bigint
+)

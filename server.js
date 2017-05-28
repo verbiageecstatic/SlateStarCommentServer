@@ -27,6 +27,8 @@ var LOAD_COMMENTS_EVERY = 10*1000;
 var FAIL_RETRY = 5*60*1000;
 //The number of pages of results we load before committing the transaction
 var MAX_PAGES = 10;
+//How frequently we send out emails
+var SEND_EMAILS_EVERY = 20*60*1000
 
 
 //cache our loaded configuration
@@ -36,6 +38,8 @@ var _config_cache;
 var latestTimestamp = null;
 //If we hit an error fetching comments, save it
 var lastError = null;
+//If we hit an error sending emails, save it
+var lastEmailSendError = null;
 
 
 //Loads our configuration from config.json.  This is a git-ignored file
@@ -126,7 +130,7 @@ function fetchComments() {
         client.query('SELECT pg_advisory_xact_lock(352342)');
         
         //Find our most recent comment, so we can get comments after that one
-        var res = client.query('SELECT timestamp FROM public.comments ORDER BY timestamp DESC LIMIT 1');
+        var res = client.query('SELECT timestamp FROM comments ORDER BY timestamp DESC LIMIT 1');
         var start;
         if (res.rows[0]) {
              start = parseInt(res.rows[0].timestamp);
@@ -148,7 +152,7 @@ function fetchComments() {
             }
             
             //Otherwise, look it up from the database
-            res = client.query("SELECT data->'author_name'::text as author_name FROM public.comments WHERE id = $1", [id])
+            res = client.query("SELECT data->'author_name'::text as author_name FROM comments WHERE id = $1", [id])
             if (!res.rows[0] || !res.rows[0].author_name) { return null; }
             ids_to_author_name[id] = res.rows[0].author_name;
             return ids_to_author_name[id];
@@ -222,7 +226,7 @@ function fetchComments() {
                 
                 //Write the comment to postgres
                 params = [comment.id, comment, timestamp, in_reply_to]
-                client.query("INSERT INTO public.comments (id, data, timestamp, in_reply_to) VALUES ($1,$2,$3,$4)", params)
+                client.query("INSERT INTO comments (id, data, timestamp, in_reply_to) VALUES ($1,$2,$3,$4)", params)
                 
                 //Temporary debugging
                 //console.log('Added: ' + JSON.stringify(params, null, 4));
@@ -251,6 +255,8 @@ function statusEndpoint (req, res, next) {
         var msg = 'Status: ';
         if (lastError) {
             msg += 'unhealthy\n\nLast error:\n' + lastError.stack
+        } else if (lastEmailSendError) {
+            msg += 'unhealthy\n\nLast email-send error:\n' + lastEmailSendError.stack
         } else if (latestTimestamp) {
             msg += 'healthy'
         } else {
@@ -337,7 +343,7 @@ var replies = endpoint(function(req, res) {
         limit = page_size;
         offset = limit * (page - 1);
         
-        sql = "SELECT data FROM public.comments WHERE in_reply_to @> ARRAY[$1] AND timestamp > $2 ORDER BY timestamp LIMIT $3 OFFSET $4";
+        sql = "SELECT data FROM comments WHERE in_reply_to @> ARRAY[$1] AND timestamp > $2 ORDER BY timestamp LIMIT $3 OFFSET $4";
         
         return client.query(sql, [author_name, from, limit, offset]).rows;
     });
@@ -422,7 +428,7 @@ var send = endpoint(function(req, res) {
         
         //See if we already have a subscription; if so, abort
         var alreadySubscribed = withClient(function(client) {
-            return client.query('SELECT 1 FROM public.subscriptions WHERE email = $1 and author_name = $2', [email, author_name]).rows.length > 0;
+            return client.query('SELECT 1 FROM subscriptions WHERE email = $1 and author_name = $2', [email, author_name]).rows.length > 0;
         });
         if (alreadySubscribed) {
             res.end('You are already subscribed!');
@@ -435,7 +441,7 @@ var send = endpoint(function(req, res) {
             //Generate a token to prove ownership of the email and save it to the database
             //with a 24 hour expiration
             var expiration = Date.now() + 24*60*60*1000;
-            client.query('INSERT INTO public.tokens (id, email, expiration) VALUES ($1, $2, $3)', [token, email, expiration])
+            client.query('INSERT INTO tokens (id, email, expiration) VALUES ($1, $2, $3)', [token, email, expiration])
         });
         
         //Actually send the email
@@ -518,7 +524,7 @@ var verify = endpoint(function(req, res) {
     
     //In a transaction, verify the token and create the subscription
     transaction(function(client) {
-        results = client.query("DELETE FROM public.tokens WHERE id = $1 RETURNING email, expiration", [token]);
+        results = client.query("DELETE FROM tokens WHERE id = $1 RETURNING email, expiration", [token]);
         //make sure a) we found the token, and b) it's not expired
         if (results.rows.length < 1 || results.rows[0].expiration < Date.now()) {
             res.statusCode = 400;
@@ -530,7 +536,7 @@ var verify = endpoint(function(req, res) {
         
         //Create the subscription.  If it already exists, do nothing
         var id = createToken();
-        var sql = 'INSERT INTO public.subscriptions (id, email, author_name) VALUES ($1, $2, $3) ON CONFLICT (email, author_name) DO NOTHING';
+        var sql = 'INSERT INTO subscriptions (id, email, author_name) VALUES ($1, $2, $3) ON CONFLICT (email, author_name) DO NOTHING';
         client.query(sql, [id, email, author_name]);
     });
     
@@ -552,7 +558,7 @@ function unsubscribe(req, res) {
     
     //Delete the subscription with that id and email
     withClient(function(client) {
-        client.query('DELETE FROM public.subscriptions WHERE id = $1 and email = $2', [id, email]);
+        client.query('DELETE FROM subscriptions WHERE id = $1 and email = $2', [id, email]);
     });
     
     //Report success
@@ -616,6 +622,56 @@ function startServer() {
 
 }
 
+//Loads all replies that we should notify on since the last send we did, and processes them
+function doSendEmails() {
+    var toSend = transaction(function(client) {
+        //If we've never sent any email updates, start from the present time
+        client.query('INSERT INTO current_email_status (id, timestamp) VALUES (0, $1) ON CONFLICT DO NOTHING', [Date.now()]);
+        
+        //Get the most recent timestamp and lock access
+        var res = client.query('SELECT timestamp FROM current_email_status WHERE id = 0 FOR UPDATE')
+        var startTime = res.rows[0].timestamp
+    
+        //Get all comments since this timestamp joined with the email we should send them to
+        var query = 'SELECT c.data, c.timestamp, s.email FROM comments c INNER JOIN subscriptions s ON s.author_name = ANY (c.in_reply_to) WHERE c.timestamp > $1 ORDER BY c.timestamp';
+        res = client.query(query, [startTime]);
+        
+        //Get the most recent timestamp to use as the start time next time we do this
+        var endTime = res.rows[res.rows.length - 1].timestamp;
+        
+        //And save it
+        client.query('UPDATE current_email_status SET timestamp = $1 WHERE id = 0')
+        
+        //We end the transaction here, prior to sending the emails, since it's probably
+        //better to skip comments than to double-send and spam users
+        return res.rows;
+    });
+}
+
+//Sends out any email notifications for comments that have come in in the last 20 minutes
+function sendEmails() {
+    //Kick off a synchronous coroutine
+    block.run(function() {
+        try {
+            doSendEmails();
+            
+            //Indicate that our latest email send was successful
+            lastEmailSendError = null;
+            
+            //We successfully completed, so do this again in 20 minutes
+            setTimeout(getLatestComments, SEND_EMAILS_EVERY);
+        }
+        catch (err) {
+            //Record the latest failure for monitoring purposes
+            lastEmailSendError = err;
+        
+            //Try again in 20 minutes
+            console.log('error fetching sending emails:');
+            console.log(err.stack);
+            setTimeout(sendEmails, SEND_EMAILS_EVERY);
+        }
+    });
+}
 
 //Reads in the latest comments from the WordPress api, processes them,
 //and then persists them to our postgres database
@@ -667,6 +723,7 @@ if (require.main === module) {
 
     startServer();
     getLatestComments();
+    sendEmails();
     
     //if we have an uncaught exception, we want to log it (but not immediately exit)
     process.on('uncaughtException', function (err) {
