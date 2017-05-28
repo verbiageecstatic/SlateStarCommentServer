@@ -471,12 +471,9 @@ var send = endpoint(function(req, res) {
 });
 
 
-//Sends an email to verify that this email address wants to subscribe to author_name's comments
-function sendVerificationEmail(email, author_name, tokenUrl) {
-    var subject = '[SSC Comments] Subscribe to SSC Comment Replies for ' + author_name;
-    var html = '<p>Someone (you, we hope), requested that ' + email + ' be subscribed to replies to ';
-    html += author_name + "'s comments on Slate Star Codex.</p>";
-    html += '<p>If this is correct, <a href="' + tokenUrl + '">please click here to confirm</a>.</p>';
+
+//Sends an email
+function sendEmail(to, subject, html) {
     var from = get_config().email;
     var domain = from.split('@')[1];
     var from = 'SSC Comments <' + from + '>';
@@ -503,7 +500,54 @@ function sendVerificationEmail(email, author_name, tokenUrl) {
     if (response.statusCode < 200 || response.statusCode > 299) {
         throw new Error('Failed sending to Mailgun: ' + response.statusCode + '\n' + response.body);
     }
+}
+
+//Sends an email to verify that this email address wants to subscribe to author_name's comments
+function sendVerificationEmail(email, author_name, tokenUrl) {
+    var subject = '[SSC Comments] Subscribe to SSC Comment Replies for ' + author_name;
+    var html = '<p>Someone (you, we hope), requested that ' + email + ' be subscribed to replies to ';
+    html += author_name + "'s comments on Slate Star Codex.</p>";
+    html += '<p>If this is correct, <a href="' + tokenUrl + '">please click here to confirm</a>.</p>';
     
+    sendEmail(email, subject, html);
+}
+
+//Send an email with the given replies to the given email
+function emailReplies(email, replies) {
+    var unsubscribe_link = get_config().hostname + '/unsubscribe?' + querystring.stringify({email: email, id: replies[0].id});
+    
+    //Generate the list of unique author names and unique subscriptions
+    var authors = {}
+    var subscriptions = {}
+    for (var i = 0; i < replies.length; i++) {
+        authors[replies[i].data.author_name] = true;
+        subscriptions[replies[i].id] = replies[i].author_name;
+    }
+    author_names = []
+    for (var k in authors) {
+        author_names.push(k);
+    }
+
+    var subject = '[SSC Comments] ' + author_names.join(', ') + ' replied to you on SSC';
+    
+    var body = "<h2>SSC Comment Replies to You</h2>";
+    var body += '<p>The following ' + replies.length + ' comments were recently posted in reply to you:</p>';
+    for (var i = 0; i < replies.length; i++) {
+        body += '<p>&nbsp;<\p><h4>' + replies[i].data.author_name + ' wrote:<h4>';
+        body += '<p>' + replies[i].data.link + '</p>';
+        body += replies[i].data.content.rendered;
+    }
+    
+    //Add unsubscribe links
+    for (var id in subscriptions) {
+        body += '<p>&nbsp;</p>';
+        body += "<p>You're receiving this message because you're signed up to receive notifications about replies to " + subscriptions[id] + '</p>';
+        var unsub_link = 'http://' + get_config().hostname + '/unsubscribe?' + querystring.stringify({email: email, id: id});
+        body += '<p><a href="' + unsub_link + '">Click here to unsubscribe</a></p>'
+    }
+    
+    //And send it
+    sendEmail(email, subject, body);
 }
 
 //Express route called from within an email that verifies ownership and creates
@@ -633,7 +677,7 @@ function doSendEmails() {
         var startTime = res.rows[0].timestamp
     
         //Get all comments since this timestamp joined with the email we should send them to
-        var query = 'SELECT c.data, c.timestamp, s.email FROM comments c INNER JOIN subscriptions s ON s.author_name = ANY (c.in_reply_to) WHERE c.timestamp > $1 ORDER BY c.timestamp';
+        var query = 'SELECT c.data, c.timestamp, s.email, s.id, s.author_name FROM comments c INNER JOIN subscriptions s ON s.author_name = ANY (c.in_reply_to) WHERE c.timestamp > $1 ORDER BY c.timestamp';
         res = client.query(query, [startTime]);
         
         //Get the most recent timestamp to use as the start time next time we do this
@@ -646,6 +690,21 @@ function doSendEmails() {
         //better to skip comments than to double-send and spam users
         return res.rows;
     });
+    
+    //Go through the comments and bucket them by email
+    var byEmail = {}
+    for (var i = 0; i < toSend.length; i++) {
+        var comment = toSend[i];
+        if (!byEmail[comment.email]) {
+            byEmail[comment.email] = [];
+        }
+        byEmail[comment.email].push(comment);
+    }
+    
+    //Then send an email for each set of comments
+    for (email in byEmail) {
+        emailReplies(email, byEmail[email]);
+    }
 }
 
 //Sends out any email notifications for comments that have come in in the last 20 minutes
@@ -719,6 +778,11 @@ if (require.main === module) {
     if (!get_config().mailgun_secret) {
         console.log('Please set "mailgun_secret" in config.json.');
         process.exit(1);
+    }
+    //Confirms we've configured a hostname for generating unsubscribe links
+    if (!get_config().hostname) {
+        console.log('Please set "hostname" in config.json (e.g., "www.myhost.com")')
+        process.exit(1)
     }
 
     startServer();
