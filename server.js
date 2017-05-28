@@ -122,6 +122,7 @@ function fetchComments() {
     //Track the latest timestamp for this operation.  On commit, we update the global
     //latestTimestamp variable
     var lt = null;
+    var start;
 
     //We run this entire operation as a transaction to protect against accidentally
     //having two comment-fetching processes running at once
@@ -131,7 +132,7 @@ function fetchComments() {
         
         //Find our most recent comment, so we can get comments after that one
         var res = client.query('SELECT timestamp FROM comments ORDER BY timestamp DESC LIMIT 1');
-        var start;
+        
         if (res.rows[0]) {
              start = parseInt(res.rows[0].timestamp);
         } else {
