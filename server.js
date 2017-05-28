@@ -745,7 +745,8 @@ function sendEmails() {
             lastEmailSendError = null;
             
             //We successfully completed, so do this again in 20 minutes
-            setTimeout(getLatestComments, SEND_EMAILS_EVERY);
+            setTimeout(sendEmails, SEND_EMAILS_EVERY);
+            
         }
         catch (err) {
             //Record the latest failure for monitoring purposes
