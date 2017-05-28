@@ -191,7 +191,7 @@ function fetchComments() {
             //module, so using curl...
             var block = Block();
             child_process.exec("curl '" + url + "'", block.make_cb());
-            response = block.wait();
+            var response = block.wait();
             
             var comments = JSON.parse(response);
             
