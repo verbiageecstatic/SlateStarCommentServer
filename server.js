@@ -694,10 +694,10 @@ function doSendEmails() {
         var toReturn = res.rows;
         
         //Get the most recent timestamp to use as the start time next time we do this
-        var endtime = null;
+        var endTime = null;
         
         if (res.rows.length > 0) {
-             endtime = res.rows[res.rows.length - 1].timestamp;
+             endTime = res.rows[res.rows.length - 1].timestamp;
         } else {
             //If there is nothing to send, we want to keep incrementing the timestamp because
             //otherwise the first time someone subscribes they could get old posts
