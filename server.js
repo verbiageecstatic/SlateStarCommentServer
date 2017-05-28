@@ -490,7 +490,7 @@ function sendEmail(to, subject, html) {
         },
         form: {
             from: from,
-            to: email,
+            to: to,
             subject: subject,
             html: html
         }
@@ -531,7 +531,7 @@ function emailReplies(email, replies) {
     var subject = '[SSC Comments] ' + author_names.join(', ') + ' replied to you on SSC';
     
     var body = "<h2>SSC Comment Replies to You</h2>";
-    var body += '<p>The following ' + replies.length + ' comments were recently posted in reply to you:</p>';
+    body += '<p>The following ' + replies.length + ' comments were recently posted in reply to you:</p>';
     for (var i = 0; i < replies.length; i++) {
         body += '<p>&nbsp;<\p><h4>' + replies[i].data.author_name + ' wrote:<h4>';
         body += '<p>' + replies[i].data.link + '</p>';
@@ -681,10 +681,19 @@ function doSendEmails() {
         res = client.query(query, [startTime]);
         
         //Get the most recent timestamp to use as the start time next time we do this
-        var endTime = res.rows[res.rows.length - 1].timestamp;
+        var endtime;
+        if (res.rows.length > 0) {
+             endTime = res.rows[res.rows.length - 1].timestamp;
+        } else {
+            //If there is nothing to send, we want to keep incrementing the timestamp because
+            //otherwise the first time someone subscribes they could get old posts
+            endTime = latestTimestamp;
+        }
         
         //And save it
-        client.query('UPDATE current_email_status SET timestamp = $1 WHERE id = 0')
+        if (endTime) {
+            client.query('UPDATE current_email_status SET timestamp = $1 WHERE id = 0')
+        }
         
         //We end the transaction here, prior to sending the emails, since it's probably
         //better to skip comments than to double-send and spam users
