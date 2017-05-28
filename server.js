@@ -687,7 +687,11 @@ function doSendEmails() {
         } else {
             //If there is nothing to send, we want to keep incrementing the timestamp because
             //otherwise the first time someone subscribes they could get old posts
-            endTime = latestTimestamp;
+            query = 'SELECT timestamp from comments c ORDER BY timestamp DESC LIMIT 1'
+            res = client.query(query);
+            if (res.rows.length > 0) {
+                endTime = res.rows[0].timestamp;
+            }
         }
         
         //And save it
