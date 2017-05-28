@@ -190,7 +190,7 @@ function fetchComments() {
             block = Block();
             var cmd = "curl '" + url + "'"
             //console.log(cmd);
-            child_process.exec(cmd, block.make_cb());
+            child_process.exec(cmd, {maxBuffer: 10000*1024}, block.make_cb());
             response = block.wait();
             
             comments = JSON.parse(response);
