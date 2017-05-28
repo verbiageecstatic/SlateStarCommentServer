@@ -131,6 +131,7 @@ function fetchComments() {
     //latestTimestamp variable
     var lt = null;
     var start;
+    var comments, response;
 
     //We run this entire operation as a transaction to protect against accidentally
     //having two comment-fetching processes running at once
@@ -191,9 +192,9 @@ function fetchComments() {
             //module, so using curl...
             var block = Block();
             child_process.exec("curl '" + url + "'", block.make_cb());
-            var response = block.wait();
+            response = block.wait();
             
-            var comments = JSON.parse(response);
+            comments = JSON.parse(response);
             
             //Temporary debugging
             console.log(response);
@@ -489,6 +490,7 @@ function sendEmail(to, subject, html) {
     var domain = from.split('@')[1];
     var from = 'SSC Comments <' + from + '>';
     var url = 'https://api.mailgun.net/v3/' + domain + '/messages';
+    var response;
     
     var block = Block()
     request({
