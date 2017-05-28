@@ -11,8 +11,8 @@
 var pg = require('pg');
 var fs = require('fs');
 var fibers = require('fibers');
-var block = require('./block');
-var Block = block.Block;
+var block_lib = require('./block');
+var Block = block_lib.Block;
 var request = require('request');
 var child_process = require('child_process')
 var querystring = require('querystring');
@@ -87,11 +87,11 @@ function get_pool() {
 
 //Runs a function passing in a postgres client with a sync query function, which we release on completion
 function withClient(fn) {
-    var client = block.await(get_pool().connect())
+    var client = block_lib.await(get_pool().connect())
     try {
         var c = {
             query: function (sql, params) {
-                return block.await(client.query(sql, params));
+                return block_lib.await(client.query(sql, params));
             }
         }
         return fn(c);
@@ -131,7 +131,7 @@ function fetchComments() {
     //latestTimestamp variable
     var lt = null;
     var start;
-    var comments, response;
+    var comments, response, block;
 
     //We run this entire operation as a transaction to protect against accidentally
     //having two comment-fetching processes running at once
@@ -190,7 +190,7 @@ function fetchComments() {
             //Do the request and error if it's not a 200 response
             //For some bizarre reason, I get weird results using the built-in node request
             //module, so using curl...
-            var block = Block();
+            block = Block();
             child_process.exec("curl '" + url + "'", block.make_cb());
             response = block.wait();
             
@@ -292,7 +292,7 @@ function statusEndpoint (req, res, next) {
 //co-routine and handles errors
 function endpoint(fn) {
     return function (req, res, next) {
-        block.run(function() {
+        block_lib.run(function() {
             try {
                 fn(req, res);
             }
@@ -737,7 +737,7 @@ function doSendEmails() {
 //Sends out any email notifications for comments that have come in in the last 20 minutes
 function sendEmails() {
     //Kick off a synchronous coroutine
-    block.run(function() {
+    block_lib.run(function() {
         try {
             doSendEmails();
             
@@ -763,7 +763,7 @@ function sendEmails() {
 //and then persists them to our postgres database
 function getLatestComments() {
     //Kick off a synchronous coroutine
-    block.run(function() {
+    block_lib.run(function() {
         try {
             fetchComments();
             
