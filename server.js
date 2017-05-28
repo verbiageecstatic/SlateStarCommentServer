@@ -178,7 +178,8 @@ function fetchComments() {
                 page: page,
                 per_page: 100,
                 after: toWordpressDate(start),
-                order: 'asc'
+                order: 'asc',
+                orderby: 'date_gmt'
             }
             url = url + querystring.stringify(params);
             
@@ -189,7 +190,7 @@ function fetchComments() {
             //For some bizarre reason, I get weird results using the built-in node request
             //module, so using curl...
             var block = Block();
-            child_process.exec('curl ' + url, block.make_cb());
+            child_process.exec("curl '" + url + "'", block.make_cb());
             response = block.wait();
             
             var comments = JSON.parse(response);
@@ -211,7 +212,7 @@ function fetchComments() {
                 ids_to_author_name[comment.id] = comment.author_name;
                 
                 timestamp = (new Date(comment.date_gmt)).valueOf();
-                if (timestamp < lt) {
+                if (timestamp < lt) { 
                     throw new Error('assertion error: got out-of-order timestamps');
                 }
                 lt = timestamp
