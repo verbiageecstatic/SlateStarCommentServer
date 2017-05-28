@@ -182,7 +182,7 @@ function fetchComments() {
             url = url + querystring.stringify(params);
             
             //Temporary debugging:
-            //console.log('Fetching ' + url);
+            console.log('Fetching ' + url);
             
             //Do the request and error if it's not a 200 response
             var block = Block();
@@ -193,6 +193,9 @@ function fetchComments() {
             }
             
             var comments = JSON.parse(response.body);
+            
+            //Temporary debugging
+            console.log('Found ' + comments.length + ' comments');
             
             //If there are no comments, we're at the end of the pagination, so break out of the while loop
             if (comments.length === 0) { break; }
