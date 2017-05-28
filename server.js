@@ -189,15 +189,15 @@ function fetchComments() {
             //module, so using curl...
             block = Block();
             var cmd = "curl '" + url + "'"
-            console.log(cmd);
+            //console.log(cmd);
             child_process.exec(cmd, block.make_cb());
             response = block.wait();
             
             comments = JSON.parse(response);
             
             //Temporary debugging
-            console.log(response);
-            console.log('Found ' + comments.length + ' comments');
+            //console.log(response);
+            //console.log('Found ' + comments.length + ' comments');
             
             //If there are no comments, we're at the end of the pagination, so break out of the while loop
             if (comments.length === 0) { break; }
@@ -545,7 +545,7 @@ function emailReplies(email, replies) {
     var body = "<h2>SSC Comment Replies to You</h2>";
     body += '<p>The following ' + replies.length + ' comments were recently posted in reply to you:</p>';
     for (var i = 0; i < replies.length; i++) {
-        body += '<p>&nbsp;<\p><h4>' + replies[i].data.author_name + ' wrote:<h4>';
+        body += '<p>&nbsp;<\p><h4>' + replies[i].data.author_name + ' wrote:</h4>';
         body += '<p>' + replies[i].data.link + '</p>';
         body += replies[i].data.content.rendered;
     }
