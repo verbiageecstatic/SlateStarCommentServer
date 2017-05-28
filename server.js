@@ -679,6 +679,7 @@ function doSendEmails() {
         //Get all comments since this timestamp joined with the email we should send them to
         var query = 'SELECT c.data, c.timestamp, s.email, s.id, s.author_name FROM comments c INNER JOIN subscriptions s ON s.author_name = ANY (c.in_reply_to) WHERE c.timestamp > $1 ORDER BY c.timestamp';
         res = client.query(query, [startTime]);
+        var toReturn = res.rows;
         
         //Get the most recent timestamp to use as the start time next time we do this
         var endtime;
@@ -701,7 +702,7 @@ function doSendEmails() {
         
         //We end the transaction here, prior to sending the emails, since it's probably
         //better to skip comments than to double-send and spam users
-        return res.rows;
+        return toReturn;
     });
     
     //Go through the comments and bucket them by email
