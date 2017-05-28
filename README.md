@@ -24,3 +24,9 @@ To fetch replies for a user, query https://sscnotify.bakkot.com/replies.  This e
 This endpoint returns an array of comments in the same format as returned by the Wordpress API's comments endpoint (documented here: https://developer.wordpress.org/rest-api/reference/comments/).
 
 For example, to return 10 replies to Scott's comments on Sept 1, 2014, you would visit: https://sscnotify.bakkot.com/replies?author_name=Scott%20Alexander&from=1409591958000
+
+## Email Subscriptions
+
+Users can sign up to get email notifications of replies to their comments at the following url: https://sscnotify.bakkot.com/subscribe.  This url takes one parameter, author_name.  For example: https://sscnotify.bakkot.com/subscribe?author_name=Scott%20Alexander.  
+
+Once subscribed, users will get periodic emails with any new replies to that user name.  Emails have an unsubscribe link in them to cancel future subscriptions.
