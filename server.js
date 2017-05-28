@@ -600,7 +600,7 @@ var verify = endpoint(function(req, res) {
 });
 
 //Express route for unsubscribing from an email subscription
-function unsubscribe(req, res) {
+var unsubscribe = endpoint(function(req, res) {
     //Extract the subscription id and email from the query string
     var params, id, email;
     params = url.parse(req.url, true).query;
@@ -619,7 +619,7 @@ function unsubscribe(req, res) {
     
     //Report success
     res.end('Email ' + email + ' has been unsubscribed from these notifications');
-}
+});
 
 
 //Starts up our API server
