@@ -14,13 +14,14 @@ var fibers = require('fibers');
 var block_lib = require('./block');
 var Block = block_lib.Block;
 var request = require('request');
-var child_process = require('child_process')
+var child_process = require('child_process');
 var querystring = require('querystring');
 var express = require('express');
-var url = require('url')
+var url = require('url');
 var greenlock_express = require('greenlock-express');
-var bodyParser = require('body-parser')
-var crypto = require('crypto')
+var bodyParser = require('body-parser');
+var crypto = require('crypto');
+var escapeHTML = require('escape-html');
 
 //How soon we kick off the loading-new-comments process after the last one finishes
 var LOAD_COMMENTS_EVERY = 10*1000;
@@ -398,7 +399,7 @@ function subscribe(req, res) {
         return
     }  
     
-    res.end(HTML.replace(/{author_name}/g, author_name));
+    res.end(HTML.replace(/{author_name}/g, escapeHTML(author_name)));
 }
 
 //Generates a random token
@@ -478,7 +479,7 @@ var send = endpoint(function(req, res) {
     }
     
     //Indicate success
-    res.end('Verification email sent to ' + email + '.  Check your email to finish the signup process');
+    res.end('Verification email sent to ' + escapeHTML(email) + '.  Check your email to finish the signup process');
 });
 
 
@@ -516,9 +517,9 @@ function sendEmail(to, subject, html) {
 
 //Sends an email to verify that this email address wants to subscribe to author_name's comments
 function sendVerificationEmail(email, author_name, tokenUrl) {
-    var subject = '[SSC Comments] Subscribe to SSC Comment Replies for ' + author_name;
-    var html = '<p>Someone (you, we hope), requested that ' + email + ' be subscribed to replies to ';
-    html += author_name + "'s comments on Slate Star Codex.</p>";
+    var subject = '[SSC Comments] Subscribe to SSC Comment Replies for ' + escapeHTML(author_name);
+    var html = '<p>Someone (you, we hope), requested that ' + escapeHTML(email) + ' be subscribed to replies to ';
+    html += escapeHTML(author_name) + "'s comments on Slate Star Codex.</p>";
     html += '<p>If this is correct, <a href="' + tokenUrl + '">please click here to confirm</a>.</p>';
     
     sendEmail(email, subject, html);
