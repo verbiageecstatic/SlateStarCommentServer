@@ -220,9 +220,9 @@ function fetchComments() {
                 in_reply_to = []
                 
                 //See if there any explicit @ references
-                //Currently, we count anything from an @ to a '@', '.', ';', ':', ',', or dash
+                //Currently, we count anything from an @ to a '@', '<', '.', ';', ':', ',', or dash
                 //as an author name.
-                var regex = /@([^@.;:,\-\u2013\u2014]+)/g
+                var regex = /@([^@<.;:,\-\u2013\u2014]+)/g
                 while (match = regex.exec(comment.content.rendered)) {
                     in_reply_to.push(match[1].trim());
                     
