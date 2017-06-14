@@ -382,7 +382,9 @@ HTML += '<form method="POST" action="send" enctype="application/x-www-form-urlen
 HTML += '<input type="hidden" name="author_name" value="{author_name}"></input>\n';
 HTML += '<p><input type="email" placeholder="email" name="email"></input></p>\n';
 HTML += '<p><input type="submit"></input></p>\n';
-HTML += '</form></body></html>';
+HTML += '</form>\n';
+HTML += '<p>(<a href="https://github.com/verbiageecstatic/SlateStarCommentServer/issues">Issues?</a>)</p>\n';
+HTML += '</body></html>';
 
 //Express route that renders the subscription html for a given author_name
 function subscribe(req, res) {
@@ -456,7 +458,7 @@ var send = endpoint(function(req, res) {
         });
         
         //Actually send the email
-        var tokenUrl = req.hostname + '/verify?' + querystring.stringify({author_name: author_name, token: token});
+        var tokenUrl = 'https://' + req.hostname + '/verify?' + querystring.stringify({author_name: author_name, token: token});
         sendVerificationEmail(email, author_name, tokenUrl);
         
         //Update lastSend and totalEmails
@@ -526,7 +528,7 @@ function sendVerificationEmail(email, author_name, tokenUrl) {
 
 //Send an email with the given replies to the given email
 function emailReplies(email, replies) {
-    var unsubscribe_link = get_config().hostname + '/unsubscribe?' + querystring.stringify({email: email, id: replies[0].id});
+    var unsubscribe_link = 'https://' + get_config().hostname + '/unsubscribe?' + querystring.stringify({email: email, id: replies[0].id});
     
     //Generate the list of unique author names and unique subscriptions
     var authors = {}
@@ -554,7 +556,7 @@ function emailReplies(email, replies) {
     for (var id in subscriptions) {
         body += '<p>&nbsp;</p>';
         body += "<p>You're receiving this message because you're signed up to receive notifications about replies to " + subscriptions[id] + '</p>';
-        var unsub_link = 'http://' + get_config().hostname + '/unsubscribe?' + querystring.stringify({email: email, id: id});
+        var unsub_link = 'https://' + get_config().hostname + '/unsubscribe?' + querystring.stringify({email: email, id: id});
         body += '<p><a href="' + unsub_link + '">Click here to unsubscribe</a></p>'
     }
     
