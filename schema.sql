@@ -51,3 +51,5 @@ CREATE TABLE public.current_email_status (
     id int PRIMARY KEY,
     timestamp bigint
 )
+
+ALTER TABLE public.comments ADD COLUMN sent_email boolean;

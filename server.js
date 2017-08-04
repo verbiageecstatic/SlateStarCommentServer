@@ -28,7 +28,7 @@ var LOAD_COMMENTS_EVERY = 10*60*1000;
 //How long we wait before retrying the loading-new-comments process if it fails
 var FAIL_RETRY = 5*60*1000;
 //How frequently we send out emails
-var SEND_EMAILS_EVERY = 20*60*1000
+var SEND_EMAILS_EVERY = 5*60*1000
 
 
 //cache our loaded configuration
@@ -674,9 +674,12 @@ function doSendEmails() {
         //Get the most recent timestamp and lock access
         var res = client.query('SELECT timestamp FROM current_email_status WHERE id = 0 FOR UPDATE')
         var startTime = res.rows[0].timestamp
+        
+        //Subtract two hours from the timestamp because I don't trust the wordpress API
+        startTime -= 2 * 60 * 60 * 1000;
     
         //Get all comments since this timestamp joined with the email we should send them to
-        var query = 'SELECT c.data, c.timestamp, s.email, s.id, s.author_name FROM comments c INNER JOIN subscriptions s ON s.author_name = ANY (c.in_reply_to) WHERE c.timestamp > $1 ORDER BY c.timestamp';
+        var query = 'SELECT c.id as comment_id, c.data, c.timestamp, s.email, s.id, s.author_name FROM comments c INNER JOIN subscriptions s ON s.author_name = ANY (c.in_reply_to) WHERE c.timestamp > $1 AND NOT COALESCE(c.sent_email, false) ORDER BY c.timestamp';
         res = client.query(query, [startTime]);
         var toReturn = res.rows;
         
@@ -698,6 +701,11 @@ function doSendEmails() {
         //And save it
         if (endTime) {
             client.query('UPDATE current_email_status SET timestamp = $1 WHERE id = 0', [endTime])
+        }
+        
+        //Mark the comments as sent
+        for (var i = 0; i < toReturn.length; i++) {
+            client.query('UPDATE comments SET sent_email = true WHERE id = $1', [toReturn[i].comment_id]);
         }
         
         //We end the transaction here, prior to sending the emails, since it's probably
