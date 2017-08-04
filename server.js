@@ -24,11 +24,9 @@ var crypto = require('crypto');
 var escapeHTML = require('escape-html');
 
 //How soon we kick off the loading-new-comments process after the last one finishes
-var LOAD_COMMENTS_EVERY = 10*1000;
+var LOAD_COMMENTS_EVERY = 10*60*1000;
 //How long we wait before retrying the loading-new-comments process if it fails
 var FAIL_RETRY = 5*60*1000;
-//The number of pages of results we load before committing the transaction
-var MAX_PAGES = 10;
 //How frequently we send out emails
 var SEND_EMAILS_EVERY = 20*60*1000
 
@@ -128,8 +126,7 @@ function toWordpressDate(timestamp) {
 //Fetches all the comments that have come in since we last fetched,
 //and persists them to the database as a single transaction.
 function fetchComments() {
-    //Track the latest timestamp for this operation.  On commit, we update the global
-    //latestTimestamp variable
+    //Track the latest timestamp for this operation.  
     var lt = null;
     var start;
     var comments, response, block;
@@ -140,15 +137,8 @@ function fetchComments() {
         //Acquire a lock so that only one process does this at a time
         client.query('SELECT pg_advisory_xact_lock(352342)');
         
-        //Find our most recent comment, so we can get comments after that one
-        var res = client.query('SELECT timestamp FROM comments ORDER BY timestamp DESC LIMIT 1');
-        
-        if (res.rows[0]) {
-             start = parseInt(res.rows[0].timestamp);
-        } else {
-            //Start from the beginning of time (plus a bit because Wordpress errors if start = 0)
-            start = 86400000; 
-        }
+        //Start from 24 hours ago
+        start = Date.now() - 24 * 60 * 60 * 1000; 
         
         //We maintain a cache of comment ids to author names, because comments will
         //generally be in reply to recently posted comments, so it makes sense to remember
@@ -170,9 +160,8 @@ function fetchComments() {
         }
         
         //Start from the first page of results, and go until there are no more results
-        //or we are at MAX_PAGES
         var page = 1;
-        while (page <= MAX_PAGES) {
+        while (true) {
         
             //Build the parameters to make the call to the wordpress API
             var url = get_config().api_base + '/wp-json/wp/v2/comments?'
@@ -213,12 +202,9 @@ function fetchComments() {
                 ids_to_author_name[comment.id] = comment.author_name;
                 
                 timestamp = (new Date(comment.date_gmt)).valueOf();
-                if (timestamp < lt) { 
-                    throw new Error('assertion error: got out-of-order timestamps');
-                }
-                lt = timestamp
+                lt = timestamp;
                 
-                in_reply_to = []
+                in_reply_to = [];
                 
                 //See if there any explicit @ references
                 //Currently, we count anything from an @ to a '@', '<', '.', ';', ':', ',', or dash
@@ -236,9 +222,9 @@ function fetchComments() {
                     in_reply_to.push(getAuthorName(comment.parent));
                 }
                 
-                //Write the comment to postgres
+                //Write the comment to postgres, skipping if it is already there
                 params = [comment.id, comment, timestamp, in_reply_to]
-                client.query("INSERT INTO comments (id, data, timestamp, in_reply_to) VALUES ($1,$2,$3,$4)", params)
+                client.query("INSERT INTO comments (id, data, timestamp, in_reply_to) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING", params)
                 
                 //Temporary debugging
                 //console.log('Added: ' + JSON.stringify(params, null, 4));
