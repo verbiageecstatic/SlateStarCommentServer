@@ -185,10 +185,11 @@ function fetchComments() {
 
             // Parse the response, and throw a helpful error message if we don't get
             // something parseable
-            try
+            try {
                 comments = JSON.parse(response);
-            catch err
-                throw new Error 'Could not parse response from ' + url + ' as JSON:\n' + response
+            } catch (err) {
+                throw new Error('Could not parse response from ' + url + ' as JSON:\n' + response);
+            }
 
             //Temporary debugging
             //console.log(response);
