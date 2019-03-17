@@ -178,7 +178,7 @@ function fetchComments() {
             //For some bizarre reason, I get weird results using the built-in node request
             //module, so using curl...
             block = Block();
-            var cmd = "curl '" + url + "'"
+            var cmd = "curl -L '" + url + "'"
             //console.log(cmd);
             child_process.exec(cmd, {maxBuffer: 10000*1024}, block.make_cb());
             response = block.wait();
