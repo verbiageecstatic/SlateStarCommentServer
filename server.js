@@ -32,7 +32,7 @@ var SEND_EMAILS_EVERY = 5*60*1000
 
 
 //cache our loaded configuration
-var _config_cache; 
+var _config_cache;
 
 //Track how caught up we are
 var latestTimestamp = null;
@@ -62,7 +62,7 @@ function get_config() {
 
 
 //store our pool of postgres clients
-var _pool_cache; 
+var _pool_cache;
 
 //Returns our pool of postgres clients
 function get_pool() {
@@ -76,7 +76,7 @@ function get_pool() {
             msg += ' "host", "port", "max", "idleTimeoutMillis".  See new pg.Pool at ';
             msg += 'https://github.com/brianc/node-postgres';
             console.log(msg);
-            
+
             process.exit(1);
         }
         _pool_cache = new pg.Pool(postgres);
@@ -126,7 +126,7 @@ function toWordpressDate(timestamp) {
 //Fetches all the comments that have come in since we last fetched,
 //and persists them to the database as a single transaction.
 function fetchComments() {
-    //Track the latest timestamp for this operation.  
+    //Track the latest timestamp for this operation.
     var lt = null;
     var start;
     var comments, response, block;
@@ -136,33 +136,33 @@ function fetchComments() {
     transaction(function(client) {
         //Acquire a lock so that only one process does this at a time
         client.query('SELECT pg_advisory_xact_lock(352342)');
-        
+
         //Start from 24 hours ago
-        start = Date.now() - 24 * 60 * 60 * 1000; 
-        
+        start = Date.now() - 24 * 60 * 60 * 1000;
+
         //We maintain a cache of comment ids to author names, because comments will
         //generally be in reply to recently posted comments, so it makes sense to remember
         //so we don't have to constantly query the database
         var ids_to_author_name = {}
-        
+
         //Given a comment id, looks up the author name
         function getAuthorName(id) {
             //If we have it already, just return it
             if (ids_to_author_name[id]) {
                 return ids_to_author_name[id];
             }
-            
+
             //Otherwise, look it up from the database
             res = client.query("SELECT data->'author_name'::text as author_name FROM comments WHERE id = $1", [id])
             if (!res.rows[0] || !res.rows[0].author_name) { return null; }
             ids_to_author_name[id] = res.rows[0].author_name;
             return ids_to_author_name[id];
         }
-        
+
         //Start from the first page of results, and go until there are no more results
         var page = 1;
         while (true) {
-        
+
             //Build the parameters to make the call to the wordpress API
             var url = get_config().api_base + '/wp-json/wp/v2/comments?'
             var params = {
@@ -173,7 +173,7 @@ function fetchComments() {
                 orderby: 'date_gmt'
             }
             url = url + querystring.stringify(params);
-            
+
             //Do the request and error if it's not a 200 response
             //For some bizarre reason, I get weird results using the built-in node request
             //module, so using curl...
@@ -182,58 +182,63 @@ function fetchComments() {
             //console.log(cmd);
             child_process.exec(cmd, {maxBuffer: 10000*1024}, block.make_cb());
             response = block.wait();
-            
-            comments = JSON.parse(response);
-            
+
+            // Parse the response, and throw a helpful error message if we don't get
+            // something parseable
+            try
+                comments = JSON.parse(response);
+            catch err
+                throw new Error 'Could not parse response from ' + url + ' as JSON:\n' + response
+
             //Temporary debugging
             //console.log(response);
             //console.log('Found ' + comments.length + ' comments');
-            
+
             //If there are no comments, we're at the end of the pagination, so break out of the while loop
             if (comments.length === 0) { break; }
-            
+
             //Go through each comment, calculate the timestamp and in_reply_to fields,
             //and persist to the database
             var comment, timestamp, in_reply_to, params;
             for (var i = 0; i < comments.length; i++) {
                 comment = comments[i];
-                
+
                 //update our ids_to_author_name hash
                 ids_to_author_name[comment.id] = comment.author_name;
-                
+
                 timestamp = (new Date(comment.date_gmt)).valueOf();
                 lt = timestamp;
-                
+
                 in_reply_to = [];
-                
+
                 //See if there any explicit @ references
                 //Currently, we count anything from an @ to a '@', '<', '.', ';', ':', ',', or dash
                 //as an author name.
                 var regex = /@([^@<.;:,\-\u2013\u2014]+)/g
                 while (match = regex.exec(comment.content.rendered)) {
                     in_reply_to.push(match[1].trim());
-                    
+
                     //TODO: can we compare unrecognized author names against our comment
                     //database and see if we can guess who they were referring to?
                 }
-                
+
                 //See if there is a parent post
                 if (comment.parent && getAuthorName(comment.parent)) {
                     in_reply_to.push(getAuthorName(comment.parent));
                 }
-                
+
                 //Write the comment to postgres, skipping if it is already there
                 params = [comment.id, comment, timestamp, in_reply_to]
                 client.query("INSERT INTO comments (id, data, timestamp, in_reply_to) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING", params)
-                
+
                 //Temporary debugging
                 //console.log('Added: ' + JSON.stringify(params, null, 4));
             }
-            
+
             page++;
         }
     });
-    
+
     //We've successfully committed, so update the latest timestamp,
     //and clear last error
     if (lt === null) {
@@ -242,7 +247,7 @@ function fetchComments() {
         latestTimestamp = lt;
     }
     lastError = null;
-    
+
     //Temporary debugging
     //console.log('Successfully committed');
 }
@@ -264,7 +269,7 @@ function statusEndpoint (req, res, next) {
             msg += '\n\n\nCaught up to: ' + String(new Date(latestTimestamp))
         }
         res.end(msg);
-    
+
     } catch (err) {
         console.log(err);
         next(err);
@@ -311,13 +316,13 @@ var replies = endpoint(function(req, res) {
     } else {
         page_size = 10;
     }
-    
+
     //Sends a 400 message to the client
     function return400 (msg) {
         res.statusCode = 400;
         res.end(msg);
     }
-    
+
     //Validate the parameters
     if (!author_name) {
         return return400('Missing "author_name" parameter in querystring');
@@ -331,25 +336,25 @@ var replies = endpoint(function(req, res) {
     if (Number.isNaN(page_size) || page_size < 1 || page_size > 100) {
         return return400('Invalid "page_size" parameter: should be an integer between 1 and 100');
     }
-    
+
     //Get a postgres client and do a search for comments that match these parameters
     var rows = withClient(function(client) {
         var limit, offset;
         //Currently we return at most 100 replies per call
         limit = page_size;
         offset = limit * (page - 1);
-        
+
         sql = "SELECT data FROM comments WHERE in_reply_to @> ARRAY[$1] AND timestamp > $2 ORDER BY timestamp LIMIT $3 OFFSET $4";
-        
+
         return client.query(sql, [author_name, from, limit, offset]).rows;
     });
-    
+
     //Build the results to return to the client
     var results = [];
     for (var i = 0; i < rows.length; i++) {
         results.push(rows[i].data);
     }
-    
+
     //And send them
     res.end(JSON.stringify(results));
 });
@@ -377,14 +382,14 @@ function subscribe(req, res) {
     var params, author_name;
     params = url.parse(req.url, true).query;
     author_name = params.author_name;
-    
+
     //If missing, send an error
     if (!author_name) {
         res.statusCode = 400;
         res.end('Missing "author_name" parameter in querystring');
         return
-    }  
-    
+    }
+
     res.end(HTML.replace(/{author_name}/g, escapeHTML(author_name)));
 }
 
@@ -410,12 +415,12 @@ var send = endpoint(function(req, res) {
         res.end('Missing form data: author_name or email');
         return;
     }
-    
+
     //Check if we've already recently sent a subscription email to this address.  If so, no need to send again
     //We define already sent as 30 seconds * 2 ^ number of emails we've already sent to this address
     var alreadySent = lastSend[email] && (Date.now() - lastSend[email] < Math.pow(2, totalEmails[email]) * 30000)
     if (!alreadySent) {
-    
+
         //Rate limit IP addresses to 20 requests per 24 hours
         fromIP[req.ip] = fromIP[req.ip] || 0;
         if (fromIP[req.ip] > 20) {
@@ -423,7 +428,7 @@ var send = endpoint(function(req, res) {
             res.end('Too many requests');
             return;
         }
-        
+
         //See if we already have a subscription; if so, abort
         var alreadySubscribed = withClient(function(client) {
             return client.query('SELECT 1 FROM subscriptions WHERE email = $1 and author_name = $2', [email, author_name]).rows.length > 0;
@@ -432,38 +437,38 @@ var send = endpoint(function(req, res) {
             res.end('You are already subscribed!');
             return
         }
-        
+
         var token = createToken();
-        
+
         withClient(function(client) {
             //Generate a token to prove ownership of the email and save it to the database
             //with a 24 hour expiration
             var expiration = Date.now() + 24*60*60*1000;
             client.query('INSERT INTO tokens (id, email, expiration) VALUES ($1, $2, $3)', [token, email, expiration])
         });
-        
+
         //Actually send the email
         var tokenUrl = 'https://' + req.hostname + '/verify?' + querystring.stringify({author_name: author_name, token: token});
         sendVerificationEmail(email, author_name, tokenUrl);
-        
+
         //Update lastSend and totalEmails
         lastSend[email] = Date.now();
         totalEmails[email] = totalEmails[email] ? totalEmails[email] + 1 : 1;
-        
+
         //And clear them in 24 hours
-        setTimeout(function() { 
+        setTimeout(function() {
             delete lastSend[email];
             totalEmails[email];
         }, 24*60*60*1000);
-        
+
         //Update rate limiting counter
         fromIP[req.ip]++;
-        setTimeout(function() { 
-            fromIP[req.ip]--; 
+        setTimeout(function() {
+            fromIP[req.ip]--;
             if (fromIP[req.ip] === 0) { delete fromIP[req.ip]; }
         }, 24*60*60*1000);
     }
-    
+
     //Indicate success
     res.end('Verification email sent to ' + escapeHTML(email) + '.  Check your email to finish the signup process');
 });
@@ -477,7 +482,7 @@ function sendEmail(to, subject, html) {
     var from = 'SSC Comments <' + from + '>';
     var url = 'https://api.mailgun.net/v3/' + domain + '/messages';
     var response;
-    
+
     var block = Block()
     request({
         url: url,
@@ -495,7 +500,7 @@ function sendEmail(to, subject, html) {
         }
     }, block.make_cb());
     response = block.wait();
-    
+
     if (response.statusCode < 200 || response.statusCode > 299) {
         throw new Error('Failed sending to Mailgun: ' + response.statusCode + '\n' + response.body);
     }
@@ -507,14 +512,14 @@ function sendVerificationEmail(email, author_name, tokenUrl) {
     var html = '<p>Someone (you, we hope), requested that ' + escapeHTML(email) + ' be subscribed to replies to ';
     html += escapeHTML(author_name) + "'s comments on Slate Star Codex.</p>";
     html += '<p>If this is correct, <a href="' + tokenUrl + '">please click here to confirm</a>.</p>';
-    
+
     sendEmail(email, subject, html);
 }
 
 //Send an email with the given replies to the given email
 function emailReplies(email, replies) {
     var unsubscribe_link = 'https://' + get_config().hostname + '/unsubscribe?' + querystring.stringify({email: email, id: replies[0].id});
-    
+
     //Generate the list of unique author names and unique subscriptions
     var authors = {}
     var subscriptions = {}
@@ -528,7 +533,7 @@ function emailReplies(email, replies) {
     }
 
     var subject = '[SSC Comments] ' + author_names.join(', ') + ' replied to you on SSC';
-    
+
     var body = "<h2>SSC Comment Replies to You</h2>";
     body += '<p>The following ' + replies.length + ' comments were recently posted in reply to you:</p>';
     for (var i = 0; i < replies.length; i++) {
@@ -536,7 +541,7 @@ function emailReplies(email, replies) {
         body += '<p>' + replies[i].data.link + '</p>';
         body += replies[i].data.content.rendered;
     }
-    
+
     //Add unsubscribe links
     for (var id in subscriptions) {
         body += '<p>&nbsp;</p>';
@@ -544,7 +549,7 @@ function emailReplies(email, replies) {
         var unsub_link = 'https://' + get_config().hostname + '/unsubscribe?' + querystring.stringify({email: email, id: id});
         body += '<p><a href="' + unsub_link + '">Click here to unsubscribe</a></p>'
     }
-    
+
     //And send it
     sendEmail(email, subject, body);
 }
@@ -557,14 +562,14 @@ var verify = endpoint(function(req, res) {
     params = url.parse(req.url, true).query;
     author_name = params.author_name;
     token = params.token;
-    
+
     //Validate we have them
     if (!author_name || !token) {
         res.statusCode = 400;
         res.end('Oops, it looks like you did not copy the full link from the email... some information got cut off!');
         return
     }
-    
+
     //In a transaction, verify the token and create the subscription
     transaction(function(client) {
         results = client.query("DELETE FROM tokens WHERE id = $1 RETURNING email, expiration", [token]);
@@ -574,15 +579,15 @@ var verify = endpoint(function(req, res) {
             res.end('Oops, it looks like this verification request is expired.  Please send a new request!');
             return
         }
-        
+
         var email = results.rows[0].email;
-        
+
         //Create the subscription.  If it already exists, do nothing
         var id = createToken();
         var sql = 'INSERT INTO subscriptions (id, email, author_name) VALUES ($1, $2, $3) ON CONFLICT (email, author_name) DO NOTHING';
         client.query(sql, [id, email, author_name]);
     });
-    
+
     res.end('Thanks, your email address has been verified!  You will now start receiving replies.  To unsubscribe, just click the link in the bottom of any email.');
 });
 
@@ -593,17 +598,17 @@ var unsubscribe = endpoint(function(req, res) {
     params = url.parse(req.url, true).query;
     id = params.id;
     email = params.email;
-    
+
     if (!id || !email) {
         res.statusCode = 400;
         res.end('Oops, it looks like you did not copy the full link from the email... some information got cut off!');
     }
-    
+
     //Delete the subscription with that id and email
     withClient(function(client) {
         client.query('DELETE FROM subscriptions WHERE id = $1 and email = $2', [id, email]);
     });
-    
+
     //Report success
     res.end('Email ' + email + ' has been unsubscribed from these notifications');
 });
@@ -612,7 +617,7 @@ var unsubscribe = endpoint(function(req, res) {
 //Starts up our API server
 function startServer() {
     var app = express();
-    
+
     //install the various endpoints:
     app.use(bodyParser.urlencoded({extended: false}));
     app.get('/replies', replies);
@@ -621,10 +626,10 @@ function startServer() {
     app.post('/send', send);
     app.get('/unsubscribe', unsubscribe);
     app.get('/', statusEndpoint);
-    
+
     var port = get_config().port;
-    
-    
+
+
     //If we have a an ssl_port defined in our configuration, set up ssl
     //using LetsEncrypt
     var ssl_port = get_config().ssl_port;
@@ -641,7 +646,7 @@ function startServer() {
             server = 'staging';
             console.log('using letsencrypt staging server -- switch to prod when ready');
         }
-        
+
         //Create a LetsEncrypt wrapper and host it on our http and https port
         greenlock_express.create({
             server: server,
@@ -650,8 +655,8 @@ function startServer() {
             approveDomains: [letsEncrypt.domain],
             app: app
         }).listen(port, ssl_port);
-    
-    } else {    
+
+    } else {
         app.listen(port, function(err) {
             if (err) {
                 console.log('Unable to listen on port ' + port + ': ');
@@ -661,7 +666,7 @@ function startServer() {
             console.log('Listening on port ' + port);
         });
     }
-    
+
 
 }
 
@@ -670,22 +675,22 @@ function doSendEmails() {
     var toSend = transaction(function(client) {
         //If we've never sent any email updates, start from the present time
         client.query('INSERT INTO current_email_status (id, timestamp) VALUES (0, $1) ON CONFLICT DO NOTHING', [Date.now()]);
-        
+
         //Get the most recent timestamp and lock access
         var res = client.query('SELECT timestamp FROM current_email_status WHERE id = 0 FOR UPDATE')
         var startTime = res.rows[0].timestamp
-        
+
         //Subtract two hours from the timestamp because I don't trust the wordpress API
         startTime -= 2 * 60 * 60 * 1000;
-    
+
         //Get all comments since this timestamp joined with the email we should send them to
         var query = 'SELECT c.id as comment_id, c.data, c.timestamp, s.email, s.id, s.author_name FROM comments c INNER JOIN subscriptions s ON s.author_name = ANY (c.in_reply_to) WHERE c.timestamp > $1 AND NOT COALESCE(c.sent_email, false) ORDER BY c.timestamp';
         res = client.query(query, [startTime]);
         var toReturn = res.rows;
-        
+
         //Get the most recent timestamp to use as the start time next time we do this
         var endTime = null;
-        
+
         if (res.rows.length > 0) {
              endTime = res.rows[res.rows.length - 1].timestamp;
         } else {
@@ -697,22 +702,22 @@ function doSendEmails() {
                 endTime = res.rows[0].timestamp;
             }
         }
-        
+
         //And save it
         if (endTime) {
             client.query('UPDATE current_email_status SET timestamp = $1 WHERE id = 0', [endTime])
         }
-        
+
         //Mark the comments as sent
         for (var i = 0; i < toReturn.length; i++) {
             client.query('UPDATE comments SET sent_email = true WHERE id = $1', [toReturn[i].comment_id]);
         }
-        
+
         //We end the transaction here, prior to sending the emails, since it's probably
         //better to skip comments than to double-send and spam users
         return toReturn;
     });
-    
+
     //Go through the comments and bucket them by email
     var byEmail = {}
     for (var i = 0; i < toSend.length; i++) {
@@ -722,7 +727,7 @@ function doSendEmails() {
         }
         byEmail[comment.email].push(comment);
     }
-    
+
     //Then send an email for each set of comments
     for (email in byEmail) {
         emailReplies(email, byEmail[email]);
@@ -735,18 +740,18 @@ function sendEmails() {
     block_lib.run(function() {
         try {
             doSendEmails();
-            
+
             //Indicate that our latest email send was successful
             lastEmailSendError = null;
-            
+
             //We successfully completed, so do this again in 20 minutes
             setTimeout(sendEmails, SEND_EMAILS_EVERY);
-            
+
         }
         catch (err) {
             //Record the latest failure for monitoring purposes
             lastEmailSendError = err;
-        
+
             //Try again in 20 minutes
             console.log('error fetching sending emails:');
             console.log(err.stack);
@@ -762,14 +767,14 @@ function getLatestComments() {
     block_lib.run(function() {
         try {
             fetchComments();
-            
+
             //We successfully completed, so do this again in 30 seconds
             setTimeout(getLatestComments, LOAD_COMMENTS_EVERY);
         }
         catch (err) {
             //Record the latest failure for monitoring purposes
             lastError = err;
-        
+
             //Try again in 5 minutes
             console.log('error fetching comments:');
             console.log(err.stack);
@@ -779,7 +784,7 @@ function getLatestComments() {
 }
 
 
-//If this file is the entry point, start up our server and begin 
+//If this file is the entry point, start up our server and begin
 //fetching comments
 if (require.main === module) {
     //Confirm we've configured an api base url
@@ -815,7 +820,7 @@ if (require.main === module) {
     startServer();
     getLatestComments();
     sendEmails();
-    
+
     //if we have an uncaught exception, we want to log it (but not immediately exit)
     process.on('uncaughtException', function (err) {
         console.log('uncaught exception:');
